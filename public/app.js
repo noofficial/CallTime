@@ -212,6 +212,8 @@ const databaseState = {
   donors: [],
   filtered: [],
   activeDonorId: null,
+  selectedClientId: null,
+  clientAssignments: new Set(),
 };
 
 const elements = {
@@ -255,8 +257,9 @@ const elements = {
   historyList: document.getElementById("history-list"),
   deleteDonor: document.getElementById("delete-donor"),
   donorUpdated: document.getElementById("donor-updated"),
-  databaseClientName: document.getElementById("database-client-name"),
   databaseClientMeta: document.getElementById("database-client-meta"),
+  databaseClientSelector: document.getElementById("database-client-selector"),
+  donorClientAssignments: document.getElementById("donor-client-assignments"),
 };
 
 let clientFormMode = { mode: "create", id: null };
@@ -296,6 +299,7 @@ function bindEvents() {
     closeDonorDatabase();
   });
   elements.addDonor.addEventListener("click", handleCreateDonor);
+  elements.databaseClientSelector?.addEventListener("change", handleDatabaseClientChange);
   elements.donorDatabaseSearch.addEventListener("input", handleDatabaseSearch);
   elements.donorForm.addEventListener("submit", handleDonorFormSubmit);
   elements.addHistoryEntry.addEventListener("click", handleAddHistoryEntry);
@@ -909,26 +913,22 @@ function startCallSession() {
   elements.workspace.focus();
 }
 
+
 function openDonorDatabase() {
-  if (!state.activeClientId) {
-    window.alert("Select a client to manage donor records.");
-    return;
+  if (!state.clients.length) {
+    databaseState.selectedClientId = null;
+  } else if (
+    !databaseState.selectedClientId ||
+    !state.clients.some((client) => client.id === databaseState.selectedClientId)
+  ) {
+    databaseState.selectedClientId = state.activeClientId || state.clients[0].id;
   }
-  const client = state.clients.find((c) => c.id === state.activeClientId);
-  if (!client) return;
-  syncDatabaseState();
-  elements.databaseClientName.textContent = client.label || "Untitled client";
-  elements.databaseClientMeta.textContent = [
-    client.candidate,
-    client.office,
-    client.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-  ]
-    .filter(Boolean)
-    .join(" • ");
+  elements.donorDatabaseSearch.value = "";
+  databaseState.activeDonorId = null;
+  syncDatabaseState({ preserveActive: false });
+  populateDatabaseClientSelector();
+  updateDatabaseMeta();
   renderDatabaseList();
-  if (!databaseState.activeDonorId && databaseState.filtered.length) {
-    databaseState.activeDonorId = databaseState.filtered[0].id;
-  }
   renderDatabaseEditor();
   if (typeof elements.donorDatabase.showModal === "function") {
     elements.donorDatabase.showModal();
@@ -946,19 +946,26 @@ function closeDonorDatabase() {
 }
 
 function handleCreateDonor() {
-  if (!state.activeClientId) return;
-  const donor = db.createDonor(state.activeClientId, { firstName: "New", lastName: "Donor" });
+  const assignedClients = [];
+  if (databaseState.selectedClientId) {
+    assignedClients.push(databaseState.selectedClientId);
+  } else if (state.activeClientId) {
+    assignedClients.push(state.activeClientId);
+  }
+  const donor = db.createDonor({ firstName: "New", lastName: "Donor" }, assignedClients);
   databaseState.activeDonorId = donor.id;
-  state.activeDonorId = donor.id;
-  elements.donorDatabaseSearch.value = "";
-  syncDatabaseState();
+  syncDatabaseState({ preserveActive: true });
+  populateDatabaseClientSelector();
+  updateDatabaseMeta();
   renderDatabaseList();
   renderDatabaseEditor();
-  loadDonorData(state.clients.find((c) => c.id === state.activeClientId));
+  if (assignedClients.includes(state.activeClientId)) {
+    refreshActiveClientQueue(true);
+  }
 }
 
 function handleDatabaseSearch() {
-  syncDatabaseState();
+  syncDatabaseState({ preserveActive: true });
   renderDatabaseList();
   renderDatabaseEditor();
 }
@@ -971,10 +978,12 @@ function handleDonorSelection(donorId) {
 
 function handleDonorFormSubmit(event) {
   event.preventDefault();
-  if (!state.activeClientId || !databaseState.activeDonorId) return;
+  if (!databaseState.activeDonorId) return;
   const formData = new FormData(elements.donorForm);
   const payload = Object.fromEntries(formData.entries());
-  db.updateDonor(state.activeClientId, databaseState.activeDonorId, {
+  const donorId = databaseState.activeDonorId;
+  const previousClients = new Set(db.getClientsForDonor(donorId));
+  db.updateDonor(donorId, {
     firstName: payload.firstName?.trim(),
     lastName: payload.lastName?.trim(),
     email: payload.email?.trim(),
@@ -984,21 +993,30 @@ function handleDonorFormSubmit(event) {
     city: payload.city?.trim(),
     tags: payload.tags?.trim(),
     pictureUrl: payload.pictureUrl?.trim(),
-    ask: payload.ask,
+    ask: payload.ask === "" ? null : Number(payload.ask),
     lastGift: payload.lastGift?.trim(),
     donorNotes: payload.notes?.trim(),
     biography: payload.biography?.trim(),
   });
-  syncDatabaseState();
+  const assignments = Array.from(
+    elements.donorClientAssignments?.querySelectorAll('input[name="donorClients"]:checked') || [],
+  ).map((input) => input.value);
+  db.setDonorClients(donorId, assignments);
+  const updatedClients = new Set(db.getClientsForDonor(donorId));
+  syncDatabaseState({ preserveActive: true });
+  updateDatabaseMeta();
   renderDatabaseList();
   renderDatabaseEditor();
-  loadDonorData(state.clients.find((c) => c.id === state.activeClientId));
+  const activeClient = state.activeClientId;
+  if (activeClient && (previousClients.has(activeClient) || updatedClients.has(activeClient))) {
+    refreshActiveClientQueue(true);
+  }
   elements.donorUpdated.textContent = `Saved ${new Date().toLocaleString()}`;
 }
 
 function handleAddHistoryEntry() {
-  if (!state.activeClientId || !databaseState.activeDonorId) return;
-  const year = Number(elements.historyYear.value);
+  if (!databaseState.activeDonorId) return;
+  const yearValue = Number(elements.historyYear.value);
   const candidate = elements.historyCandidate.value.trim();
   const amountValue = elements.historyAmount.value;
   const amount = amountValue === "" ? null : Number(amountValue);
@@ -1006,70 +1024,91 @@ function handleAddHistoryEntry() {
     window.alert("Add a candidate name before saving the contribution.");
     return;
   }
-  db.addContribution(state.activeClientId, databaseState.activeDonorId, {
-    year: Number.isNaN(year) ? undefined : year,
+  const donorId = databaseState.activeDonorId;
+  const previousClients = new Set(db.getClientsForDonor(donorId));
+  db.addContribution(donorId, {
+    year: Number.isNaN(yearValue) ? undefined : yearValue,
     candidate,
     amount,
   });
   elements.historyYear.value = "";
   elements.historyCandidate.value = "";
   elements.historyAmount.value = "";
-  syncDatabaseState();
-  renderDatabaseList();
+  syncDatabaseState({ preserveActive: true });
   renderDatabaseEditor();
-  loadDonorData(state.clients.find((c) => c.id === state.activeClientId));
+  const activeClient = state.activeClientId;
+  if (activeClient && previousClients.has(activeClient)) {
+    refreshActiveClientQueue(true);
+  }
   elements.donorUpdated.textContent = `Logged contribution ${new Date().toLocaleTimeString()}`;
 }
 
 function handleHistoryListClick(event) {
   const button = event.target.closest("button[data-history]");
-  if (!button || !state.activeClientId || !databaseState.activeDonorId) return;
-  db.removeContribution(state.activeClientId, databaseState.activeDonorId, button.dataset.history);
-  syncDatabaseState();
+  if (!button || !databaseState.activeDonorId) return;
+  const donorId = databaseState.activeDonorId;
+  const previousClients = new Set(db.getClientsForDonor(donorId));
+  db.removeContribution(donorId, button.dataset.history);
+  syncDatabaseState({ preserveActive: true });
   renderDatabaseEditor();
-  loadDonorData(state.clients.find((c) => c.id === state.activeClientId));
+  const activeClient = state.activeClientId;
+  if (activeClient && previousClients.has(activeClient)) {
+    refreshActiveClientQueue(true);
+  }
   elements.donorUpdated.textContent = `Removed contribution ${new Date().toLocaleTimeString()}`;
 }
 
 function handleDeleteDonor() {
-  if (!state.activeClientId || !databaseState.activeDonorId) return;
+  if (!databaseState.activeDonorId) return;
   const donor = databaseState.donors.find((item) => item.id === databaseState.activeDonorId);
   const confirmDelete = window.confirm(
     `Remove ${donor?.name || "this donor"} from the database? This can't be undone.`,
   );
   if (!confirmDelete) return;
-  db.deleteDonor(state.activeClientId, databaseState.activeDonorId);
+  const donorId = databaseState.activeDonorId;
+  const previousClients = db.getClientsForDonor(donorId);
+  db.deleteDonor(donorId);
   databaseState.activeDonorId = null;
-  syncDatabaseState();
+  syncDatabaseState({ preserveActive: false });
+  populateDatabaseClientSelector();
+  updateDatabaseMeta();
   renderDatabaseList();
   renderDatabaseEditor();
-  loadDonorData(state.clients.find((c) => c.id === state.activeClientId));
+  if (state.activeClientId && previousClients.includes(state.activeClientId)) {
+    refreshActiveClientQueue(false);
+  }
   elements.donorUpdated.textContent = `Deleted donor ${new Date().toLocaleTimeString()}`;
 }
 
 function exportDonorData() {
-  if (!state.activeClientId) return;
-  const donors = db.getDonors(state.activeClientId);
-  const blob = new Blob([JSON.stringify(donors, null, 2)], { type: "application/json" });
+  const payload = {
+    generatedAt: new Date().toISOString(),
+    donors: db.getAllDonors(),
+    assignments: db.getAssignments(),
+    clients: db.getClients(),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  const client = state.clients.find((c) => c.id === state.activeClientId);
-  const filename = `${(client?.label || "calltime").replace(/[^a-z0-9]+/gi, "-")}-donors.json`;
-  link.download = filename.toLowerCase();
+  link.download = `calltime-complete-donor-database.json`;
   document.body.append(link);
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
 }
 
-function syncDatabaseState() {
-  if (!state.activeClientId) {
-    databaseState.donors = [];
-    databaseState.filtered = [];
-    return;
+function syncDatabaseState({ preserveActive = false } = {}) {
+  databaseState.donors = db.getAllDonors().sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+  );
+  if (
+    databaseState.selectedClientId &&
+    !state.clients.some((client) => client.id === databaseState.selectedClientId)
+  ) {
+    databaseState.selectedClientId = state.clients[0]?.id || null;
   }
-  databaseState.donors = db.getDonors(state.activeClientId);
+  refreshClientAssignments();
   const query = elements.donorDatabaseSearch.value?.toLowerCase().trim() || "";
   databaseState.filtered = databaseState.donors.filter((donor) => {
     if (!query) return true;
@@ -1089,12 +1128,11 @@ function syncDatabaseState() {
     return haystack.includes(query);
   });
   if (
-    databaseState.activeDonorId &&
+    !preserveActive ||
+    !databaseState.activeDonorId ||
     !databaseState.filtered.some((donor) => donor.id === databaseState.activeDonorId)
   ) {
     databaseState.activeDonorId = databaseState.filtered[0]?.id || null;
-  } else if (!databaseState.activeDonorId && databaseState.filtered.length) {
-    databaseState.activeDonorId = databaseState.filtered[0].id;
   }
 }
 
@@ -1106,6 +1144,7 @@ function renderDatabaseList() {
     const button = document.createElement("button");
     button.type = "button";
     button.disabled = true;
+    button.classList.add("database-panel__select");
     button.innerHTML = `
       <span class="database-panel__item-title">No donors saved yet</span>
       <span class="database-panel__item-meta">Add a donor to begin tracking calls.</span>
@@ -1114,6 +1153,7 @@ function renderDatabaseList() {
     elements.donorDatabaseItems.append(item);
     return;
   }
+  const selectedClient = state.clients.find((client) => client.id === databaseState.selectedClientId);
   databaseState.filtered.forEach((donor) => {
     const item = document.createElement("li");
     item.className = "database-panel__item";
@@ -1128,7 +1168,30 @@ function renderDatabaseList() {
       <span class="database-panel__item-meta">${escapeHtml(meta)}</span>
     `;
     button.addEventListener("click", () => handleDonorSelection(donor.id));
-    item.append(button);
+    button.classList.add("database-panel__select");
+
+    const toggleWrapper = document.createElement("div");
+    toggleWrapper.className = "database-panel__item-toggle";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.id = `focus-${donor.id}`;
+    checkbox.className = "database-panel__focus";
+    checkbox.checked =
+      !!databaseState.selectedClientId && databaseState.clientAssignments.has(donor.id);
+    checkbox.disabled = !databaseState.selectedClientId;
+    checkbox.setAttribute(
+      "aria-label",
+      selectedClient
+        ? `Toggle ${selectedClient.label || "this client"} focus for ${donor.name}`
+        : "Select a client to manage focus assignments",
+    );
+    checkbox.addEventListener("change", (event) => handleFocusToggle(donor.id, event.currentTarget.checked));
+    const label = document.createElement("label");
+    label.setAttribute("for", checkbox.id);
+    label.textContent = "Focus";
+    toggleWrapper.append(checkbox, label);
+
+    item.append(button, toggleWrapper);
     elements.donorDatabaseItems.append(item);
   });
 }
@@ -1142,6 +1205,9 @@ function renderDatabaseEditor() {
     elements.donorForm.reset();
     elements.donorUpdated.textContent = "";
     elements.historyList.innerHTML = "";
+    if (elements.donorClientAssignments) {
+      elements.donorClientAssignments.innerHTML = "";
+    }
     return;
   }
   elements.donorForm.scrollTop = 0;
@@ -1159,7 +1225,130 @@ function renderDatabaseEditor() {
   elements.donorForm.elements.notes.value = donor.notes || "";
   elements.donorForm.elements.biography.value = donor.biography || "";
   elements.donorUpdated.textContent = "";
+  renderDonorClientAssignments(donor);
   renderHistoryList(donor.history || []);
+}
+
+function populateDatabaseClientSelector() {
+  const selector = elements.databaseClientSelector;
+  if (!selector) return;
+  selector.innerHTML = "";
+  if (!state.clients.length) {
+    selector.disabled = true;
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No clients available";
+    selector.append(option);
+    return;
+  }
+  selector.disabled = false;
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "View all donors";
+  selector.append(placeholder);
+  state.clients.forEach((client) => {
+    const option = document.createElement("option");
+    option.value = client.id;
+    option.textContent = client.label || "Untitled client";
+    selector.append(option);
+  });
+  selector.value = databaseState.selectedClientId || "";
+}
+
+function updateDatabaseMeta() {
+  const meta = elements.databaseClientMeta;
+  if (!meta) return;
+  if (!state.clients.length) {
+    meta.textContent = "Add a client to assign donors to focus lists.";
+    return;
+  }
+  if (!databaseState.selectedClientId) {
+    meta.textContent = "Viewing the full donor database. Select a client to manage assignments.";
+    return;
+  }
+  const client = state.clients.find((item) => item.id === databaseState.selectedClientId);
+  if (!client) {
+    meta.textContent = "Select a client to manage assignments.";
+    return;
+  }
+  const count = databaseState.clientAssignments.size;
+  meta.textContent = `${count} donor${count === 1 ? "" : "s"} assigned to ${client.label || "this client"}.`;
+}
+
+function refreshClientAssignments() {
+  if (databaseState.selectedClientId) {
+    databaseState.clientAssignments = new Set(
+      db.getClientDonorIds(databaseState.selectedClientId),
+    );
+  } else {
+    databaseState.clientAssignments = new Set();
+  }
+}
+
+function handleDatabaseClientChange(event) {
+  const value = event.target.value || "";
+  databaseState.selectedClientId = value || null;
+  syncDatabaseState({ preserveActive: true });
+  populateDatabaseClientSelector();
+  updateDatabaseMeta();
+  renderDatabaseList();
+}
+
+function handleFocusToggle(donorId, isChecked) {
+  if (!databaseState.selectedClientId) return;
+  if (isChecked) {
+    databaseState.clientAssignments.add(donorId);
+  } else {
+    databaseState.clientAssignments.delete(donorId);
+  }
+  db.setClientDonorIds(databaseState.selectedClientId, Array.from(databaseState.clientAssignments));
+  syncDatabaseState({ preserveActive: true });
+  updateDatabaseMeta();
+  renderDatabaseList();
+  if (state.activeClientId === databaseState.selectedClientId) {
+    refreshActiveClientQueue(true);
+  }
+}
+
+function renderDonorClientAssignments(donor) {
+  const container = elements.donorClientAssignments;
+  if (!container) return;
+  container.innerHTML = "";
+  if (!state.clients.length) {
+    container.innerHTML = '<p class="muted">Add a client to assign this donor.</p>';
+    return;
+  }
+  const assignedClients = new Set(db.getClientsForDonor(donor.id));
+  state.clients.forEach((client) => {
+    const label = document.createElement("label");
+    label.className = "donor-access__item";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.name = "donorClients";
+    input.value = client.id;
+    input.checked = assignedClients.has(client.id);
+    const span = document.createElement("span");
+    span.textContent = client.label || "Untitled client";
+    label.append(input, span);
+    container.append(label);
+  });
+}
+
+function refreshActiveClientQueue(preserveDonor = true) {
+  if (!state.activeClientId) return;
+  const donors = db.getDonors(state.activeClientId);
+  const previousDonorId = preserveDonor ? state.activeDonorId : null;
+  state.donors = donors.map((donor, index) => normalizeDonor(donor, index));
+  applyFilters();
+  if (preserveDonor && previousDonorId && state.donors.some((donor) => donor.id === previousDonorId)) {
+    renderDonorDetail(previousDonorId);
+  } else if (state.donors.length) {
+    renderDonorDetail(state.donors[0].id);
+  } else {
+    renderEmptyDetail(
+      "No donor records selected for this client yet. Use the donor database to assign supporters.",
+    );
+  }
 }
 
 function renderHistoryList(history) {

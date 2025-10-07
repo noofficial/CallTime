@@ -762,6 +762,23 @@ body::before {
   gap: 0.75rem;
 }
 
+.database-panel__list-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.database-panel__client-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.database-panel__client-picker .form-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
 .database-panel__items {
   list-style: none;
   margin: 0;
@@ -778,10 +795,14 @@ body::before {
   border-radius: var(--radius-sm);
   background: rgba(30, 41, 59, 0.5);
   transition: border-color 0.2s, background 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 
-.database-panel__item button {
-  width: 100%;
+.database-panel__select {
+  flex: 1;
   border: none;
   background: none;
   color: inherit;
@@ -793,9 +814,26 @@ body::before {
   cursor: pointer;
 }
 
-.database-panel__item button:disabled {
+.database-panel__select:disabled {
   opacity: 0.7;
   cursor: default;
+}
+
+.database-panel__item-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding-right: 0.85rem;
+}
+
+.database-panel__item-toggle label {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.database-panel__focus {
+  width: 1rem;
+  height: 1rem;
 }
 
 .database-panel__item:hover,
@@ -872,6 +910,48 @@ body::before {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+.donor-access {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 1.5rem 0;
+}
+
+.donor-access__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.donor-access__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.5rem;
+}
+
+.donor-access__item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border-radius: var(--radius-sm);
+  background: rgba(30, 41, 59, 0.35);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.donor-access__item input {
+  width: 1rem;
+  height: 1rem;
+}
+
+.donor-access__item span {
+  font-size: 0.9rem;
 }
 
 .donor-history-editor__header {
