@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Complete Donor Database · CallTime Desk</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="database-page">
+    <div class="database-app">
+      <header class="database-header">
+        <div class="database-header__titles">
+          <p class="database-header__eyebrow">CallTime Desk</p>
+          <h1>Complete donor database</h1>
+          <p class="muted">
+            Browse every donor in one place, review contribution history, and manage candidate focus
+            assignments.
+          </p>
+        </div>
+        <div class="database-header__actions">
+          <a class="btn btn--ghost" href="index.html">Back to workspace</a>
+          <a class="btn" id="export-donors" href="#">Export JSON</a>
+          <a class="btn btn--primary" href="donor-editor.html">New donor</a>
+        </div>
+      </header>
+
+      <main class="database-main">
+        <aside class="database-sidebar" aria-label="Donor directory">
+          <div class="database-sidebar__controls">
+            <label class="form-label" for="database-client-filter">Filter by candidate</label>
+            <select class="input select" id="database-client-filter"></select>
+          </div>
+          <div class="database-sidebar__search">
+            <label class="sr-only" for="database-search">Search donors</label>
+            <input
+              class="input"
+              id="database-search"
+              type="search"
+              placeholder="Search name, city, employer, tags"
+              autocomplete="off"
+            />
+          </div>
+          <ul class="database-list" id="database-list" role="list"></ul>
+        </aside>
+
+        <section class="database-detail" id="database-detail" aria-live="polite">
+          <div class="database-detail__empty" id="database-empty">
+            <h2>Select a donor</h2>
+            <p>Choose a donor from the list to see their profile and manage focus assignments.</p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="donors.js"></script>
+  </body>
+</html>
