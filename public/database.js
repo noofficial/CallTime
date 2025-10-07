@@ -10,21 +10,100 @@ export class CallTimeDatabase {
     try {
       const raw = this.storage.getItem(DATABASE_KEY);
       if (!raw) {
-        return { clients: [], donors: {} };
+        return { clients: [], donors: [], clientDonors: {} };
       }
       const parsed = JSON.parse(raw);
-      return {
-        clients: Array.isArray(parsed.clients) ? parsed.clients : [],
-        donors: typeof parsed.donors === "object" && parsed.donors !== null ? parsed.donors : {},
-      };
+      const clients = Array.isArray(parsed.clients) ? parsed.clients : [];
+      const clientDonors =
+        typeof parsed.clientDonors === "object" && parsed.clientDonors !== null ? { ...parsed.clientDonors } : {};
+
+      if (Array.isArray(parsed.donors)) {
+        return {
+          clients,
+          donors: parsed.donors.map((donor) => this.normalizeDonor(donor)),
+          clientDonors: this.normalizeClientDonorMap(clientDonors),
+        };
+      }
+
+      if (parsed.donors && typeof parsed.donors === "object") {
+        return this.migrateLegacyDonorShape(clients, parsed.donors);
+      }
+
+      return { clients, donors: [], clientDonors: this.normalizeClientDonorMap(clientDonors) };
     } catch (error) {
       console.error("Failed to parse database", error);
-      return { clients: [], donors: {} };
+      return { clients: [], donors: [], clientDonors: {} };
     }
   }
 
+  normalizeClientDonorMap(map = {}) {
+    const result = {};
+    Object.keys(map).forEach((clientId) => {
+      const list = Array.isArray(map[clientId]) ? map[clientId] : [];
+      result[clientId] = Array.from(new Set(list.filter((value) => typeof value === "string")));
+    });
+    return result;
+  }
+
+  migrateLegacyDonorShape(clients, legacyDonors) {
+    const donorMap = new Map();
+    const clientDonors = {};
+    Object.entries(legacyDonors || {}).forEach(([clientId, donorList]) => {
+      const normalizedList = Array.isArray(donorList) ? donorList : [];
+      clientDonors[clientId] = [];
+      normalizedList.forEach((raw) => {
+        const donor = this.normalizeDonor(raw);
+        const existing = donorMap.get(donor.id);
+        if (existing) {
+          donorMap.set(donor.id, this.mergeDonor(existing, donor));
+        } else {
+          donorMap.set(donor.id, donor);
+        }
+        clientDonors[clientId].push(donor.id);
+      });
+      clientDonors[clientId] = Array.from(new Set(clientDonors[clientId]));
+    });
+    return {
+      clients,
+      donors: Array.from(donorMap.values()),
+      clientDonors,
+    };
+  }
+
+  mergeDonor(existing, incoming) {
+    const merged = { ...existing };
+    Object.keys(incoming).forEach((key) => {
+      if (incoming[key] === undefined || incoming[key] === null || incoming[key] === "") return;
+      if (key === "history" && Array.isArray(incoming.history)) {
+        const historyMap = new Map();
+        (Array.isArray(existing.history) ? existing.history : []).forEach((entry) => {
+          historyMap.set(entry.id, { ...entry });
+        });
+        incoming.history.forEach((entry) => {
+          historyMap.set(entry.id, { ...entry });
+        });
+        merged.history = Array.from(historyMap.values()).sort((a, b) => {
+          if ((a.year || 0) === (b.year || 0)) {
+            return (a.candidate || "").localeCompare(b.candidate || "");
+          }
+          return (b.year || 0) - (a.year || 0);
+        });
+      } else {
+        merged[key] = incoming[key];
+      }
+    });
+    return merged;
+  }
+
   persist() {
-    this.storage.setItem(DATABASE_KEY, JSON.stringify(this.data));
+    this.storage.setItem(
+      DATABASE_KEY,
+      JSON.stringify({
+        clients: this.data.clients,
+        donors: this.data.donors,
+        clientDonors: this.data.clientDonors,
+      }),
+    );
   }
 
   reload() {
@@ -50,65 +129,98 @@ export class CallTimeDatabase {
     } else {
       this.data.clients[index] = { ...this.data.clients[index], ...record };
     }
-    if (!this.data.donors[record.id]) {
-      this.data.donors[record.id] = [];
-    }
+    this.ensureClientDonorArray(record.id);
     this.persist();
     return this.getClient(record.id);
   }
 
   removeClient(clientId) {
     this.data.clients = this.data.clients.filter((client) => client.id !== clientId);
-    if (this.data.donors[clientId]) {
-      delete this.data.donors[clientId];
+    if (this.data.clientDonors[clientId]) {
+      delete this.data.clientDonors[clientId];
     }
     this.persist();
   }
 
   getDonors(clientId) {
-    const donors = this.data.donors[clientId] || [];
-    return donors.map((donor) => this.cloneDonor(donor));
+    if (!clientId) {
+      return this.getAllDonors();
+    }
+    const donorIds = this.data.clientDonors[clientId] || [];
+    const donors = donorIds
+      .map((id) => this.data.donors.find((donor) => donor.id === id))
+      .filter(Boolean)
+      .map((donor) => this.cloneDonor(donor));
+    return donors;
+  }
+
+  getAllDonors() {
+    return this.data.donors.map((donor) => this.cloneDonor(donor));
+  }
+
+  getClientDonorIds(clientId) {
+    return Array.from(new Set(this.data.clientDonors[clientId] || []));
+  }
+
+  getClientsForDonor(donorId) {
+    return Object.entries(this.data.clientDonors)
+      .filter(([, donors]) => Array.isArray(donors) && donors.includes(donorId))
+      .map(([id]) => id);
+  }
+
+  getAssignments() {
+    return JSON.parse(JSON.stringify(this.data.clientDonors));
   }
 
   replaceDonors(clientId, donors) {
-    this.ensureClientDonorArray(clientId);
-    this.data.donors[clientId] = donors.map((donor) => this.normalizeDonor(donor));
+    if (!clientId) {
+      throw new Error("Client id is required to replace donors");
+    }
+    const normalized = donors.map((donor) => this.normalizeDonor(donor));
+    const donorIds = [];
+    normalized.forEach((donor) => {
+      donorIds.push(donor.id);
+      this.upsertDonorRecord(donor);
+    });
+    this.setClientDonorIds(clientId, donorIds);
     this.persist();
     return this.getDonors(clientId);
   }
 
-  createDonor(clientId, initial = {}) {
-    this.ensureClientDonorArray(clientId);
+  createDonor(initial = {}, clientIds = []) {
     const donor = this.normalizeDonor({ ...initial, id: initial.id || this.createDonorId(initial) });
-    this.data.donors[clientId].push(donor);
+    this.upsertDonorRecord(donor);
+    this.setDonorClients(donor.id, clientIds);
     this.persist();
     return this.cloneDonor(donor);
   }
 
-  updateDonor(clientId, donorId, updates) {
-    this.ensureClientDonorArray(clientId);
-    const donors = this.data.donors[clientId];
-    const index = donors.findIndex((donor) => donor.id === donorId);
+  updateDonor(donorId, updates = {}) {
+    const index = this.data.donors.findIndex((donor) => donor.id === donorId);
     if (index === -1) {
       throw new Error("Donor not found");
     }
-    donors[index] = this.normalizeDonor({ ...donors[index], ...updates, id: donorId });
+    const updated = this.normalizeDonor({ ...this.data.donors[index], ...updates, id: donorId });
+    this.data.donors[index] = updated;
     this.persist();
-    return this.cloneDonor(donors[index]);
+    return this.cloneDonor(updated);
   }
 
-  deleteDonor(clientId, donorId) {
-    this.ensureClientDonorArray(clientId);
-    this.data.donors[clientId] = this.data.donors[clientId].filter((donor) => donor.id !== donorId);
+  deleteDonor(donorId) {
+    this.data.donors = this.data.donors.filter((donor) => donor.id !== donorId);
+    Object.keys(this.data.clientDonors).forEach((clientId) => {
+      this.data.clientDonors[clientId] = (this.data.clientDonors[clientId] || []).filter((id) => id !== donorId);
+    });
     this.persist();
   }
 
-  addContribution(clientId, donorId, entry) {
-    this.ensureClientDonorArray(clientId);
-    const donors = this.data.donors[clientId];
-    const donor = donors.find((item) => item.id === donorId);
+  addContribution(donorId, entry) {
+    const donor = this.data.donors.find((item) => item.id === donorId);
     if (!donor) {
       throw new Error("Donor not found");
+    }
+    if (!Array.isArray(donor.history)) {
+      donor.history = [];
     }
     const contribution = this.normalizeContribution({ ...entry, id: entry.id || this.createContributionId(entry) });
     donor.history.push(contribution);
@@ -116,26 +228,63 @@ export class CallTimeDatabase {
       if (a.year === b.year) {
         return a.candidate.localeCompare(b.candidate);
       }
-      return b.year - a.year;
+      return (b.year || 0) - (a.year || 0);
     });
     this.persist();
     return contribution;
   }
 
-  removeContribution(clientId, donorId, contributionId) {
-    this.ensureClientDonorArray(clientId);
-    const donors = this.data.donors[clientId];
-    const donor = donors.find((item) => item.id === donorId);
+  removeContribution(donorId, contributionId) {
+    const donor = this.data.donors.find((item) => item.id === donorId);
     if (!donor) {
       throw new Error("Donor not found");
     }
-    donor.history = donor.history.filter((item) => item.id !== contributionId);
+    donor.history = (donor.history || []).filter((item) => item.id !== contributionId);
     this.persist();
   }
 
+  setClientDonorIds(clientId, donorIds = []) {
+    if (!clientId) return;
+    this.ensureClientDonorArray(clientId);
+    const unique = Array.from(new Set(donorIds.filter((id) => typeof id === "string")));
+    this.data.clientDonors[clientId] = unique;
+    this.persist();
+  }
+
+  setDonorClients(donorId, clientIds = []) {
+    const valid = new Set(
+      clientIds
+        .filter((id) => typeof id === "string")
+        .filter((id) => this.data.clients.some((client) => client.id === id)),
+    );
+    this.data.clients.forEach((client) => {
+      const assignments = this.data.clientDonors[client.id] || [];
+      const hasDonor = assignments.includes(donorId);
+      if (valid.has(client.id)) {
+        this.ensureClientDonorArray(client.id);
+        if (!hasDonor) {
+          this.data.clientDonors[client.id].push(donorId);
+        }
+      } else if (hasDonor) {
+        this.data.clientDonors[client.id] = assignments.filter((id) => id !== donorId);
+      }
+    });
+    this.persist();
+  }
+
+  upsertDonorRecord(donor) {
+    const index = this.data.donors.findIndex((item) => item.id === donor.id);
+    if (index === -1) {
+      this.data.donors.push(donor);
+    } else {
+      this.data.donors[index] = this.mergeDonor(this.data.donors[index], donor);
+    }
+  }
+
   ensureClientDonorArray(clientId) {
-    if (!this.data.donors[clientId]) {
-      this.data.donors[clientId] = [];
+    if (!clientId) return;
+    if (!this.data.clientDonors[clientId]) {
+      this.data.clientDonors[clientId] = [];
     }
   }
 

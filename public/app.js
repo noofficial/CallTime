@@ -208,12 +208,6 @@ const state = {
   sessionActive: false,
 };
 
-const databaseState = {
-  donors: [],
-  filtered: [],
-  activeDonorId: null,
-};
-
 const elements = {
   clientList: document.getElementById("client-list"),
   emptyState: document.getElementById("empty-state"),
@@ -229,8 +223,6 @@ const elements = {
   refreshDonors: document.getElementById("refresh-donors"),
   startSession: document.getElementById("start-session"),
   manageClients: document.getElementById("manage-clients"),
-  manageDonors: document.getElementById("manage-donors"),
-  openDatabase: document.getElementById("open-database"),
   addClient: document.getElementById("add-client"),
   loadDemo: document.getElementById("load-demo"),
   workspace: document.getElementById("workspace"),
@@ -240,23 +232,6 @@ const elements = {
   emptyCreateButton: document.getElementById("empty-create"),
   emptyDemoButton: document.getElementById("empty-demo"),
   template: document.getElementById("donor-item-template"),
-  donorDatabase: document.getElementById("donor-database"),
-  closeDonorDatabase: document.getElementById("close-donor-database"),
-  exportDonorData: document.getElementById("export-donor-data"),
-  addDonor: document.getElementById("add-donor"),
-  donorDatabaseSearch: document.getElementById("donor-database-search"),
-  donorDatabaseItems: document.getElementById("donor-database-items"),
-  donorForm: document.getElementById("donor-form"),
-  donorPlaceholder: document.getElementById("donor-placeholder"),
-  historyYear: document.getElementById("history-year"),
-  historyCandidate: document.getElementById("history-candidate"),
-  historyAmount: document.getElementById("history-amount"),
-  addHistoryEntry: document.getElementById("add-history-entry"),
-  historyList: document.getElementById("history-list"),
-  deleteDonor: document.getElementById("delete-donor"),
-  donorUpdated: document.getElementById("donor-updated"),
-  databaseClientName: document.getElementById("database-client-name"),
-  databaseClientMeta: document.getElementById("database-client-meta"),
 };
 
 let clientFormMode = { mode: "create", id: null };
@@ -288,20 +263,6 @@ function bindEvents() {
   elements.statusFilter.addEventListener("change", applyFilters);
   elements.refreshDonors.addEventListener("click", () => refreshDonorData());
   elements.startSession.addEventListener("click", startCallSession);
-  elements.manageDonors.addEventListener("click", openDonorDatabase);
-  elements.openDatabase.addEventListener("click", openDonorDatabase);
-  elements.closeDonorDatabase.addEventListener("click", closeDonorDatabase);
-  elements.donorDatabase.addEventListener("cancel", (event) => {
-    event.preventDefault();
-    closeDonorDatabase();
-  });
-  elements.addDonor.addEventListener("click", handleCreateDonor);
-  elements.donorDatabaseSearch.addEventListener("input", handleDatabaseSearch);
-  elements.donorForm.addEventListener("submit", handleDonorFormSubmit);
-  elements.addHistoryEntry.addEventListener("click", handleAddHistoryEntry);
-  elements.historyList.addEventListener("click", handleHistoryListClick);
-  elements.deleteDonor.addEventListener("click", handleDeleteDonor);
-  elements.exportDonorData.addEventListener("click", exportDonorData);
 }
 
 function loadDemoWorkspace() {
@@ -909,306 +870,24 @@ function startCallSession() {
   elements.workspace.focus();
 }
 
-function openDonorDatabase() {
-  if (!state.activeClientId) {
-    window.alert("Select a client to manage donor records.");
-    return;
-  }
-  const client = state.clients.find((c) => c.id === state.activeClientId);
-  if (!client) return;
-  syncDatabaseState();
-  elements.databaseClientName.textContent = client.label || "Untitled client";
-  elements.databaseClientMeta.textContent = [
-    client.candidate,
-    client.office,
-    client.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-  ]
-    .filter(Boolean)
-    .join(" • ");
-  renderDatabaseList();
-  if (!databaseState.activeDonorId && databaseState.filtered.length) {
-    databaseState.activeDonorId = databaseState.filtered[0].id;
-  }
-  renderDatabaseEditor();
-  if (typeof elements.donorDatabase.showModal === "function") {
-    elements.donorDatabase.showModal();
-  } else {
-    elements.donorDatabase.setAttribute("open", "");
-  }
-}
 
-function closeDonorDatabase() {
-  if (typeof elements.donorDatabase.close === "function" && elements.donorDatabase.open) {
-    elements.donorDatabase.close();
-  } else {
-    elements.donorDatabase.removeAttribute("open");
-  }
-}
-
-function handleCreateDonor() {
-  if (!state.activeClientId) return;
-  const donor = db.createDonor(state.activeClientId, { firstName: "New", lastName: "Donor" });
-  databaseState.activeDonorId = donor.id;
-  state.activeDonorId = donor.id;
-  elements.donorDatabaseSearch.value = "";
-  syncDatabaseState();
-  renderDatabaseList();
-  renderDatabaseEditor();
-  loadDonorData(state.clients.find((c) => c.id === state.activeClientId));
-}
-
-function handleDatabaseSearch() {
-  syncDatabaseState();
-  renderDatabaseList();
-  renderDatabaseEditor();
-}
-
-function handleDonorSelection(donorId) {
-  databaseState.activeDonorId = donorId;
-  renderDatabaseList();
-  renderDatabaseEditor();
-}
-
-function handleDonorFormSubmit(event) {
-  event.preventDefault();
-  if (!state.activeClientId || !databaseState.activeDonorId) return;
-  const formData = new FormData(elements.donorForm);
-  const payload = Object.fromEntries(formData.entries());
-  db.updateDonor(state.activeClientId, databaseState.activeDonorId, {
-    firstName: payload.firstName?.trim(),
-    lastName: payload.lastName?.trim(),
-    email: payload.email?.trim(),
-    phone: payload.phone?.trim(),
-    company: payload.company?.trim(),
-    industry: payload.industry?.trim(),
-    city: payload.city?.trim(),
-    tags: payload.tags?.trim(),
-    pictureUrl: payload.pictureUrl?.trim(),
-    ask: payload.ask,
-    lastGift: payload.lastGift?.trim(),
-    donorNotes: payload.notes?.trim(),
-    biography: payload.biography?.trim(),
-  });
-  syncDatabaseState();
-  renderDatabaseList();
-  renderDatabaseEditor();
-  loadDonorData(state.clients.find((c) => c.id === state.activeClientId));
-  elements.donorUpdated.textContent = `Saved ${new Date().toLocaleString()}`;
-}
-
-function handleAddHistoryEntry() {
-  if (!state.activeClientId || !databaseState.activeDonorId) return;
-  const year = Number(elements.historyYear.value);
-  const candidate = elements.historyCandidate.value.trim();
-  const amountValue = elements.historyAmount.value;
-  const amount = amountValue === "" ? null : Number(amountValue);
-  if (!candidate) {
-    window.alert("Add a candidate name before saving the contribution.");
-    return;
-  }
-  db.addContribution(state.activeClientId, databaseState.activeDonorId, {
-    year: Number.isNaN(year) ? undefined : year,
-    candidate,
-    amount,
-  });
-  elements.historyYear.value = "";
-  elements.historyCandidate.value = "";
-  elements.historyAmount.value = "";
-  syncDatabaseState();
-  renderDatabaseList();
-  renderDatabaseEditor();
-  loadDonorData(state.clients.find((c) => c.id === state.activeClientId));
-  elements.donorUpdated.textContent = `Logged contribution ${new Date().toLocaleTimeString()}`;
-}
-
-function handleHistoryListClick(event) {
-  const button = event.target.closest("button[data-history]");
-  if (!button || !state.activeClientId || !databaseState.activeDonorId) return;
-  db.removeContribution(state.activeClientId, databaseState.activeDonorId, button.dataset.history);
-  syncDatabaseState();
-  renderDatabaseEditor();
-  loadDonorData(state.clients.find((c) => c.id === state.activeClientId));
-  elements.donorUpdated.textContent = `Removed contribution ${new Date().toLocaleTimeString()}`;
-}
-
-function handleDeleteDonor() {
-  if (!state.activeClientId || !databaseState.activeDonorId) return;
-  const donor = databaseState.donors.find((item) => item.id === databaseState.activeDonorId);
-  const confirmDelete = window.confirm(
-    `Remove ${donor?.name || "this donor"} from the database? This can't be undone.`,
-  );
-  if (!confirmDelete) return;
-  db.deleteDonor(state.activeClientId, databaseState.activeDonorId);
-  databaseState.activeDonorId = null;
-  syncDatabaseState();
-  renderDatabaseList();
-  renderDatabaseEditor();
-  loadDonorData(state.clients.find((c) => c.id === state.activeClientId));
-  elements.donorUpdated.textContent = `Deleted donor ${new Date().toLocaleTimeString()}`;
-}
-
-function exportDonorData() {
+function refreshActiveClientQueue(preserveDonor = true) {
   if (!state.activeClientId) return;
   const donors = db.getDonors(state.activeClientId);
-  const blob = new Blob([JSON.stringify(donors, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  const client = state.clients.find((c) => c.id === state.activeClientId);
-  const filename = `${(client?.label || "calltime").replace(/[^a-z0-9]+/gi, "-")}-donors.json`;
-  link.download = filename.toLowerCase();
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function syncDatabaseState() {
-  if (!state.activeClientId) {
-    databaseState.donors = [];
-    databaseState.filtered = [];
-    return;
-  }
-  databaseState.donors = db.getDonors(state.activeClientId);
-  const query = elements.donorDatabaseSearch.value?.toLowerCase().trim() || "";
-  databaseState.filtered = databaseState.donors.filter((donor) => {
-    if (!query) return true;
-    const haystack = [
-      donor.name,
-      donor.firstName,
-      donor.lastName,
-      donor.company,
-      donor.industry,
-      donor.email,
-      donor.city,
-      donor.tags,
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-    return haystack.includes(query);
-  });
-  if (
-    databaseState.activeDonorId &&
-    !databaseState.filtered.some((donor) => donor.id === databaseState.activeDonorId)
-  ) {
-    databaseState.activeDonorId = databaseState.filtered[0]?.id || null;
-  } else if (!databaseState.activeDonorId && databaseState.filtered.length) {
-    databaseState.activeDonorId = databaseState.filtered[0].id;
+  const previousDonorId = preserveDonor ? state.activeDonorId : null;
+  state.donors = donors.map((donor, index) => normalizeDonor(donor, index));
+  applyFilters();
+  if (preserveDonor && previousDonorId && state.donors.some((donor) => donor.id === previousDonorId)) {
+    renderDonorDetail(previousDonorId);
+  } else if (state.donors.length) {
+    renderDonorDetail(state.donors[0].id);
+  } else {
+    renderEmptyDetail(
+      "No donor records selected for this client yet. Use the donor database to assign supporters.",
+    );
   }
 }
 
-function renderDatabaseList() {
-  elements.donorDatabaseItems.innerHTML = "";
-  if (!databaseState.filtered.length) {
-    const item = document.createElement("li");
-    item.className = "database-panel__item";
-    const button = document.createElement("button");
-    button.type = "button";
-    button.disabled = true;
-    button.innerHTML = `
-      <span class="database-panel__item-title">No donors saved yet</span>
-      <span class="database-panel__item-meta">Add a donor to begin tracking calls.</span>
-    `;
-    item.append(button);
-    elements.donorDatabaseItems.append(item);
-    return;
-  }
-  databaseState.filtered.forEach((donor) => {
-    const item = document.createElement("li");
-    item.className = "database-panel__item";
-    if (databaseState.activeDonorId === donor.id) {
-      item.classList.add("database-panel__item--active");
-    }
-    const button = document.createElement("button");
-    button.type = "button";
-    const meta = [donor.company, donor.industry, donor.city].filter(Boolean).join(" • ") || donor.email || "";
-    button.innerHTML = `
-      <span class="database-panel__item-title">${escapeHtml(donor.name)}</span>
-      <span class="database-panel__item-meta">${escapeHtml(meta)}</span>
-    `;
-    button.addEventListener("click", () => handleDonorSelection(donor.id));
-    item.append(button);
-    elements.donorDatabaseItems.append(item);
-  });
-}
-
-function renderDatabaseEditor() {
-  const donor = databaseState.donors.find((item) => item.id === databaseState.activeDonorId);
-  const hasDonor = Boolean(donor);
-  elements.donorForm.classList.toggle("hidden", !hasDonor);
-  elements.donorPlaceholder?.classList.toggle("hidden", hasDonor);
-  if (!hasDonor) {
-    elements.donorForm.reset();
-    elements.donorUpdated.textContent = "";
-    elements.historyList.innerHTML = "";
-    return;
-  }
-  elements.donorForm.scrollTop = 0;
-  elements.donorForm.elements.firstName.value = donor.firstName || "";
-  elements.donorForm.elements.lastName.value = donor.lastName || "";
-  elements.donorForm.elements.email.value = donor.email || "";
-  elements.donorForm.elements.phone.value = donor.phone || "";
-  elements.donorForm.elements.company.value = donor.company || "";
-  elements.donorForm.elements.industry.value = donor.industry || "";
-  elements.donorForm.elements.city.value = donor.city || "";
-  elements.donorForm.elements.tags.value = donor.tags || "";
-  elements.donorForm.elements.pictureUrl.value = donor.pictureUrl || "";
-  elements.donorForm.elements.ask.value = donor.ask ?? "";
-  elements.donorForm.elements.lastGift.value = donor.lastGift || "";
-  elements.donorForm.elements.notes.value = donor.notes || "";
-  elements.donorForm.elements.biography.value = donor.biography || "";
-  elements.donorUpdated.textContent = "";
-  renderHistoryList(donor.history || []);
-}
-
-function renderHistoryList(history) {
-  if (!history.length) {
-    elements.historyList.innerHTML = '<div class="history-empty">No contributions recorded yet.</div>';
-    return;
-  }
-  const groups = history.reduce((acc, entry) => {
-    const key = entry.year || "Other";
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(entry);
-    return acc;
-  }, {});
-  const years = Object.keys(groups)
-    .map((value) => Number(value))
-    .sort((a, b) => b - a);
-  elements.historyList.innerHTML = years
-    .map((year) => {
-      const entries = groups[year];
-      const rows = entries
-        .map(
-          (entry) => `
-            <tr>
-              <td>${escapeHtml(entry.candidate || "")}</td>
-              <td>${entry.amount !== null && entry.amount !== undefined ? `$${formatCurrency(entry.amount)}` : "—"}</td>
-              <td class="history-table__actions"><button type="button" class="history-delete" data-history="${escapeAttribute(
-                entry.id,
-              )}">Remove</button></td>
-            </tr>
-          `,
-        )
-        .join("");
-      return `
-        <article class="history-group">
-          <div class="history-group__title">
-            <span>${escapeHtml(String(year))}</span>
-            <span>${entries.length} entr${entries.length === 1 ? "y" : "ies"}</span>
-          </div>
-          <table class="history-table">
-            <thead>
-              <tr><th>Candidate</th><th>Amount</th><th></th></tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </article>
-      `;
-    })
-    .join("");
-}
 
 function fetchDonorSheet(url) {
   return fetch(url)
