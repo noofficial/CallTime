@@ -1,0 +1,26 @@
+{
+  "name": "calltimedesk",
+  "version": "1.0.0",
+  "description": "CallTime Desk is an internal call-time workspace for campaign finance consultants.\r Create a dedicated donor queue for each client, pull profiles from Google Sheets or\r CSV exports, and log outcomes that remain private to the active campaign.",
+  "main": "index.js",
+  "scripts": {
+  "start": "node server/index.js"
+}
+,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/noofficial/CallTime.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/noofficial/CallTime/issues"
+  },
+  "homepage": "https://github.com/noofficial/CallTime#readme",
+  "dependencies": {
+    "better-sqlite3": "^12.4.1",
+    "cors": "^2.8.5",
+    "express": "^5.1.0"
+  }
+}
