@@ -208,6 +208,14 @@ const state = {
   sessionActive: false,
 };
 
+const databaseState = {
+  donors: [],
+  filtered: [],
+  activeDonorId: null,
+  selectedClientId: null,
+  clientAssignments: new Set(),
+};
+
 const elements = {
   clientList: document.getElementById("client-list"),
   emptyState: document.getElementById("empty-state"),
@@ -232,6 +240,24 @@ const elements = {
   emptyCreateButton: document.getElementById("empty-create"),
   emptyDemoButton: document.getElementById("empty-demo"),
   template: document.getElementById("donor-item-template"),
+  donorDatabase: document.getElementById("donor-database"),
+  closeDonorDatabase: document.getElementById("close-donor-database"),
+  exportDonorData: document.getElementById("export-donor-data"),
+  addDonor: document.getElementById("add-donor"),
+  donorDatabaseSearch: document.getElementById("donor-database-search"),
+  donorDatabaseItems: document.getElementById("donor-database-items"),
+  donorForm: document.getElementById("donor-form"),
+  donorPlaceholder: document.getElementById("donor-placeholder"),
+  historyYear: document.getElementById("history-year"),
+  historyCandidate: document.getElementById("history-candidate"),
+  historyAmount: document.getElementById("history-amount"),
+  addHistoryEntry: document.getElementById("add-history-entry"),
+  historyList: document.getElementById("history-list"),
+  deleteDonor: document.getElementById("delete-donor"),
+  donorUpdated: document.getElementById("donor-updated"),
+  databaseClientMeta: document.getElementById("database-client-meta"),
+  databaseClientSelector: document.getElementById("database-client-selector"),
+  donorClientAssignments: document.getElementById("donor-client-assignments"),
 };
 
 let clientFormMode = { mode: "create", id: null };
@@ -263,6 +289,21 @@ function bindEvents() {
   elements.statusFilter.addEventListener("change", applyFilters);
   elements.refreshDonors.addEventListener("click", () => refreshDonorData());
   elements.startSession.addEventListener("click", startCallSession);
+  elements.manageDonors.addEventListener("click", openDonorDatabase);
+  elements.openDatabase.addEventListener("click", openDonorDatabase);
+  elements.closeDonorDatabase.addEventListener("click", closeDonorDatabase);
+  elements.donorDatabase.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeDonorDatabase();
+  });
+  elements.addDonor.addEventListener("click", handleCreateDonor);
+  elements.databaseClientSelector?.addEventListener("change", handleDatabaseClientChange);
+  elements.donorDatabaseSearch.addEventListener("input", handleDatabaseSearch);
+  elements.donorForm.addEventListener("submit", handleDonorFormSubmit);
+  elements.addHistoryEntry.addEventListener("click", handleAddHistoryEntry);
+  elements.historyList.addEventListener("click", handleHistoryListClick);
+  elements.deleteDonor.addEventListener("click", handleDeleteDonor);
+  elements.exportDonorData.addEventListener("click", exportDonorData);
 }
 
 function loadDemoWorkspace() {
@@ -871,6 +912,426 @@ function startCallSession() {
 }
 
 
+function openDonorDatabase() {
+  if (!state.clients.length) {
+    databaseState.selectedClientId = null;
+  } else if (
+    !databaseState.selectedClientId ||
+    !state.clients.some((client) => client.id === databaseState.selectedClientId)
+  ) {
+    databaseState.selectedClientId = state.activeClientId || state.clients[0].id;
+  }
+  elements.donorDatabaseSearch.value = "";
+  databaseState.activeDonorId = null;
+  syncDatabaseState({ preserveActive: false });
+  populateDatabaseClientSelector();
+  updateDatabaseMeta();
+  renderDatabaseList();
+  renderDatabaseEditor();
+  if (typeof elements.donorDatabase.showModal === "function") {
+    elements.donorDatabase.showModal();
+  } else {
+    elements.donorDatabase.setAttribute("open", "");
+  }
+}
+
+function closeDonorDatabase() {
+  if (typeof elements.donorDatabase.close === "function" && elements.donorDatabase.open) {
+    elements.donorDatabase.close();
+  } else {
+    elements.donorDatabase.removeAttribute("open");
+  }
+}
+
+function handleCreateDonor() {
+  const assignedClients = [];
+  if (databaseState.selectedClientId) {
+    assignedClients.push(databaseState.selectedClientId);
+  } else if (state.activeClientId) {
+    assignedClients.push(state.activeClientId);
+  }
+  const donor = db.createDonor({ firstName: "New", lastName: "Donor" }, assignedClients);
+  databaseState.activeDonorId = donor.id;
+  syncDatabaseState({ preserveActive: true });
+  populateDatabaseClientSelector();
+  updateDatabaseMeta();
+  renderDatabaseList();
+  renderDatabaseEditor();
+  if (assignedClients.includes(state.activeClientId)) {
+    refreshActiveClientQueue(true);
+  }
+}
+
+function handleDatabaseSearch() {
+  syncDatabaseState({ preserveActive: true });
+  renderDatabaseList();
+  renderDatabaseEditor();
+}
+
+function handleDonorSelection(donorId) {
+  databaseState.activeDonorId = donorId;
+  renderDatabaseList();
+  renderDatabaseEditor();
+}
+
+function handleDonorFormSubmit(event) {
+  event.preventDefault();
+  if (!databaseState.activeDonorId) return;
+  const formData = new FormData(elements.donorForm);
+  const payload = Object.fromEntries(formData.entries());
+  const donorId = databaseState.activeDonorId;
+  const previousClients = new Set(db.getClientsForDonor(donorId));
+  db.updateDonor(donorId, {
+    firstName: payload.firstName?.trim(),
+    lastName: payload.lastName?.trim(),
+    email: payload.email?.trim(),
+    phone: payload.phone?.trim(),
+    company: payload.company?.trim(),
+    industry: payload.industry?.trim(),
+    city: payload.city?.trim(),
+    tags: payload.tags?.trim(),
+    pictureUrl: payload.pictureUrl?.trim(),
+    ask: payload.ask === "" ? null : Number(payload.ask),
+    lastGift: payload.lastGift?.trim(),
+    donorNotes: payload.notes?.trim(),
+    biography: payload.biography?.trim(),
+  });
+  const assignments = Array.from(
+    elements.donorClientAssignments?.querySelectorAll('input[name="donorClients"]:checked') || [],
+  ).map((input) => input.value);
+  db.setDonorClients(donorId, assignments);
+  const updatedClients = new Set(db.getClientsForDonor(donorId));
+  syncDatabaseState({ preserveActive: true });
+  updateDatabaseMeta();
+  renderDatabaseList();
+  renderDatabaseEditor();
+  const activeClient = state.activeClientId;
+  if (activeClient && (previousClients.has(activeClient) || updatedClients.has(activeClient))) {
+    refreshActiveClientQueue(true);
+  }
+  elements.donorUpdated.textContent = `Saved ${new Date().toLocaleString()}`;
+}
+
+function handleAddHistoryEntry() {
+  if (!databaseState.activeDonorId) return;
+  const yearValue = Number(elements.historyYear.value);
+  const candidate = elements.historyCandidate.value.trim();
+  const amountValue = elements.historyAmount.value;
+  const amount = amountValue === "" ? null : Number(amountValue);
+  if (!candidate) {
+    window.alert("Add a candidate name before saving the contribution.");
+    return;
+  }
+  const donorId = databaseState.activeDonorId;
+  const previousClients = new Set(db.getClientsForDonor(donorId));
+  db.addContribution(donorId, {
+    year: Number.isNaN(yearValue) ? undefined : yearValue,
+    candidate,
+    amount,
+  });
+  elements.historyYear.value = "";
+  elements.historyCandidate.value = "";
+  elements.historyAmount.value = "";
+  syncDatabaseState({ preserveActive: true });
+  renderDatabaseEditor();
+  const activeClient = state.activeClientId;
+  if (activeClient && previousClients.has(activeClient)) {
+    refreshActiveClientQueue(true);
+  }
+  elements.donorUpdated.textContent = `Logged contribution ${new Date().toLocaleTimeString()}`;
+}
+
+function handleHistoryListClick(event) {
+  const button = event.target.closest("button[data-history]");
+  if (!button || !databaseState.activeDonorId) return;
+  const donorId = databaseState.activeDonorId;
+  const previousClients = new Set(db.getClientsForDonor(donorId));
+  db.removeContribution(donorId, button.dataset.history);
+  syncDatabaseState({ preserveActive: true });
+  renderDatabaseEditor();
+  const activeClient = state.activeClientId;
+  if (activeClient && previousClients.has(activeClient)) {
+    refreshActiveClientQueue(true);
+  }
+  elements.donorUpdated.textContent = `Removed contribution ${new Date().toLocaleTimeString()}`;
+}
+
+function handleDeleteDonor() {
+  if (!databaseState.activeDonorId) return;
+  const donor = databaseState.donors.find((item) => item.id === databaseState.activeDonorId);
+  const confirmDelete = window.confirm(
+    `Remove ${donor?.name || "this donor"} from the database? This can't be undone.`,
+  );
+  if (!confirmDelete) return;
+  const donorId = databaseState.activeDonorId;
+  const previousClients = db.getClientsForDonor(donorId);
+  db.deleteDonor(donorId);
+  databaseState.activeDonorId = null;
+  syncDatabaseState({ preserveActive: false });
+  populateDatabaseClientSelector();
+  updateDatabaseMeta();
+  renderDatabaseList();
+  renderDatabaseEditor();
+  if (state.activeClientId && previousClients.includes(state.activeClientId)) {
+    refreshActiveClientQueue(false);
+  }
+  elements.donorUpdated.textContent = `Deleted donor ${new Date().toLocaleTimeString()}`;
+}
+
+function exportDonorData() {
+  const payload = {
+    generatedAt: new Date().toISOString(),
+    donors: db.getAllDonors(),
+    assignments: db.getAssignments(),
+    clients: db.getClients(),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `calltime-complete-donor-database.json`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function syncDatabaseState({ preserveActive = false } = {}) {
+  databaseState.donors = db.getAllDonors().sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+  );
+  if (
+    databaseState.selectedClientId &&
+    !state.clients.some((client) => client.id === databaseState.selectedClientId)
+  ) {
+    databaseState.selectedClientId = state.clients[0]?.id || null;
+  }
+  refreshClientAssignments();
+  const query = elements.donorDatabaseSearch.value?.toLowerCase().trim() || "";
+  databaseState.filtered = databaseState.donors.filter((donor) => {
+    if (!query) return true;
+    const haystack = [
+      donor.name,
+      donor.firstName,
+      donor.lastName,
+      donor.company,
+      donor.industry,
+      donor.email,
+      donor.city,
+      donor.tags,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(query);
+  });
+  if (
+    !preserveActive ||
+    !databaseState.activeDonorId ||
+    !databaseState.filtered.some((donor) => donor.id === databaseState.activeDonorId)
+  ) {
+    databaseState.activeDonorId = databaseState.filtered[0]?.id || null;
+  }
+}
+
+function renderDatabaseList() {
+  elements.donorDatabaseItems.innerHTML = "";
+  if (!databaseState.filtered.length) {
+    const item = document.createElement("li");
+    item.className = "database-panel__item";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.disabled = true;
+    button.classList.add("database-panel__select");
+    button.innerHTML = `
+      <span class="database-panel__item-title">No donors saved yet</span>
+      <span class="database-panel__item-meta">Add a donor to begin tracking calls.</span>
+    `;
+    item.append(button);
+    elements.donorDatabaseItems.append(item);
+    return;
+  }
+  const selectedClient = state.clients.find((client) => client.id === databaseState.selectedClientId);
+  databaseState.filtered.forEach((donor) => {
+    const item = document.createElement("li");
+    item.className = "database-panel__item";
+    if (databaseState.activeDonorId === donor.id) {
+      item.classList.add("database-panel__item--active");
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    const meta = [donor.company, donor.industry, donor.city].filter(Boolean).join(" • ") || donor.email || "";
+    button.innerHTML = `
+      <span class="database-panel__item-title">${escapeHtml(donor.name)}</span>
+      <span class="database-panel__item-meta">${escapeHtml(meta)}</span>
+    `;
+    button.addEventListener("click", () => handleDonorSelection(donor.id));
+    button.classList.add("database-panel__select");
+
+    const toggleWrapper = document.createElement("div");
+    toggleWrapper.className = "database-panel__item-toggle";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.id = `focus-${donor.id}`;
+    checkbox.className = "database-panel__focus";
+    checkbox.checked =
+      !!databaseState.selectedClientId && databaseState.clientAssignments.has(donor.id);
+    checkbox.disabled = !databaseState.selectedClientId;
+    checkbox.setAttribute(
+      "aria-label",
+      selectedClient
+        ? `Toggle ${selectedClient.label || "this client"} focus for ${donor.name}`
+        : "Select a client to manage focus assignments",
+    );
+    checkbox.addEventListener("change", (event) => handleFocusToggle(donor.id, event.currentTarget.checked));
+    const label = document.createElement("label");
+    label.setAttribute("for", checkbox.id);
+    label.textContent = "Focus";
+    toggleWrapper.append(checkbox, label);
+
+    item.append(button, toggleWrapper);
+    elements.donorDatabaseItems.append(item);
+  });
+}
+
+function renderDatabaseEditor() {
+  const donor = databaseState.donors.find((item) => item.id === databaseState.activeDonorId);
+  const hasDonor = Boolean(donor);
+  elements.donorForm.classList.toggle("hidden", !hasDonor);
+  elements.donorPlaceholder?.classList.toggle("hidden", hasDonor);
+  if (!hasDonor) {
+    elements.donorForm.reset();
+    elements.donorUpdated.textContent = "";
+    elements.historyList.innerHTML = "";
+    if (elements.donorClientAssignments) {
+      elements.donorClientAssignments.innerHTML = "";
+    }
+    return;
+  }
+  elements.donorForm.scrollTop = 0;
+  elements.donorForm.elements.firstName.value = donor.firstName || "";
+  elements.donorForm.elements.lastName.value = donor.lastName || "";
+  elements.donorForm.elements.email.value = donor.email || "";
+  elements.donorForm.elements.phone.value = donor.phone || "";
+  elements.donorForm.elements.company.value = donor.company || "";
+  elements.donorForm.elements.industry.value = donor.industry || "";
+  elements.donorForm.elements.city.value = donor.city || "";
+  elements.donorForm.elements.tags.value = donor.tags || "";
+  elements.donorForm.elements.pictureUrl.value = donor.pictureUrl || "";
+  elements.donorForm.elements.ask.value = donor.ask ?? "";
+  elements.donorForm.elements.lastGift.value = donor.lastGift || "";
+  elements.donorForm.elements.notes.value = donor.notes || "";
+  elements.donorForm.elements.biography.value = donor.biography || "";
+  elements.donorUpdated.textContent = "";
+  renderDonorClientAssignments(donor);
+  renderHistoryList(donor.history || []);
+}
+
+function populateDatabaseClientSelector() {
+  const selector = elements.databaseClientSelector;
+  if (!selector) return;
+  selector.innerHTML = "";
+  if (!state.clients.length) {
+    selector.disabled = true;
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No clients available";
+    selector.append(option);
+    return;
+  }
+  selector.disabled = false;
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "View all donors";
+  selector.append(placeholder);
+  state.clients.forEach((client) => {
+    const option = document.createElement("option");
+    option.value = client.id;
+    option.textContent = client.label || "Untitled client";
+    selector.append(option);
+  });
+  selector.value = databaseState.selectedClientId || "";
+}
+
+function updateDatabaseMeta() {
+  const meta = elements.databaseClientMeta;
+  if (!meta) return;
+  if (!state.clients.length) {
+    meta.textContent = "Add a client to assign donors to focus lists.";
+    return;
+  }
+  if (!databaseState.selectedClientId) {
+    meta.textContent = "Viewing the full donor database. Select a client to manage assignments.";
+    return;
+  }
+  const client = state.clients.find((item) => item.id === databaseState.selectedClientId);
+  if (!client) {
+    meta.textContent = "Select a client to manage assignments.";
+    return;
+  }
+  const count = databaseState.clientAssignments.size;
+  meta.textContent = `${count} donor${count === 1 ? "" : "s"} assigned to ${client.label || "this client"}.`;
+}
+
+function refreshClientAssignments() {
+  if (databaseState.selectedClientId) {
+    databaseState.clientAssignments = new Set(
+      db.getClientDonorIds(databaseState.selectedClientId),
+    );
+  } else {
+    databaseState.clientAssignments = new Set();
+  }
+}
+
+function handleDatabaseClientChange(event) {
+  const value = event.target.value || "";
+  databaseState.selectedClientId = value || null;
+  syncDatabaseState({ preserveActive: true });
+  populateDatabaseClientSelector();
+  updateDatabaseMeta();
+  renderDatabaseList();
+}
+
+function handleFocusToggle(donorId, isChecked) {
+  if (!databaseState.selectedClientId) return;
+  if (isChecked) {
+    databaseState.clientAssignments.add(donorId);
+  } else {
+    databaseState.clientAssignments.delete(donorId);
+  }
+  db.setClientDonorIds(databaseState.selectedClientId, Array.from(databaseState.clientAssignments));
+  syncDatabaseState({ preserveActive: true });
+  updateDatabaseMeta();
+  renderDatabaseList();
+  if (state.activeClientId === databaseState.selectedClientId) {
+    refreshActiveClientQueue(true);
+  }
+}
+
+function renderDonorClientAssignments(donor) {
+  const container = elements.donorClientAssignments;
+  if (!container) return;
+  container.innerHTML = "";
+  if (!state.clients.length) {
+    container.innerHTML = '<p class="muted">Add a client to assign this donor.</p>';
+    return;
+  }
+  const assignedClients = new Set(db.getClientsForDonor(donor.id));
+  state.clients.forEach((client) => {
+    const label = document.createElement("label");
+    label.className = "donor-access__item";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.name = "donorClients";
+    input.value = client.id;
+    input.checked = assignedClients.has(client.id);
+    const span = document.createElement("span");
+    span.textContent = client.label || "Untitled client";
+    label.append(input, span);
+    container.append(label);
+  });
+}
+
 function refreshActiveClientQueue(preserveDonor = true) {
   if (!state.activeClientId) return;
   const donors = db.getDonors(state.activeClientId);
@@ -888,6 +1349,53 @@ function refreshActiveClientQueue(preserveDonor = true) {
   }
 }
 
+function renderHistoryList(history) {
+  if (!history.length) {
+    elements.historyList.innerHTML = '<div class="history-empty">No contributions recorded yet.</div>';
+    return;
+  }
+  const groups = history.reduce((acc, entry) => {
+    const key = entry.year || "Other";
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(entry);
+    return acc;
+  }, {});
+  const years = Object.keys(groups)
+    .map((value) => Number(value))
+    .sort((a, b) => b - a);
+  elements.historyList.innerHTML = years
+    .map((year) => {
+      const entries = groups[year];
+      const rows = entries
+        .map(
+          (entry) => `
+            <tr>
+              <td>${escapeHtml(entry.candidate || "")}</td>
+              <td>${entry.amount !== null && entry.amount !== undefined ? `$${formatCurrency(entry.amount)}` : "—"}</td>
+              <td class="history-table__actions"><button type="button" class="history-delete" data-history="${escapeAttribute(
+                entry.id,
+              )}">Remove</button></td>
+            </tr>
+          `,
+        )
+        .join("");
+      return `
+        <article class="history-group">
+          <div class="history-group__title">
+            <span>${escapeHtml(String(year))}</span>
+            <span>${entries.length} entr${entries.length === 1 ? "y" : "ies"}</span>
+          </div>
+          <table class="history-table">
+            <thead>
+              <tr><th>Candidate</th><th>Amount</th><th></th></tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </article>
+      `;
+    })
+    .join("");
+}
 
 function fetchDonorSheet(url) {
   return fetch(url)
