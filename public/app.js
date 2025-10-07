@@ -231,8 +231,6 @@ const elements = {
   refreshDonors: document.getElementById("refresh-donors"),
   startSession: document.getElementById("start-session"),
   manageClients: document.getElementById("manage-clients"),
-  manageDonors: document.getElementById("manage-donors"),
-  openDatabase: document.getElementById("open-database"),
   addClient: document.getElementById("add-client"),
   loadDemo: document.getElementById("load-demo"),
   workspace: document.getElementById("workspace"),
