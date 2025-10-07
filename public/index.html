@@ -27,7 +27,7 @@
             Load demo workspace
           </button>
           <button class="btn btn--ghost" id="open-database">
-            Donor database
+            Complete donor database
           </button>
           <button class="btn" id="manage-clients">Manage clients</button>
         </div>
@@ -183,7 +183,7 @@
     <dialog class="modal modal--wide" id="donor-database">
       <div class="modal__content modal__content--wide">
         <header class="modal__header">
-          <h2>Donor database</h2>
+          <h2>Complete donor database</h2>
           <div class="modal__header-actions">
             <button class="btn btn--ghost" id="export-donor-data" type="button">
               Export JSON
@@ -196,8 +196,12 @@
         <div class="modal__body database-panel">
           <aside class="database-panel__list" aria-label="Donor records">
             <div class="database-panel__list-header">
-              <div>
-                <h3 id="database-client-name">Client donors</h3>
+              <div class="database-panel__list-title">
+                <h3>All donors</h3>
+                <div class="database-panel__client-picker">
+                  <label class="form-label" for="database-client-selector">Assign to focus list</label>
+                  <select class="input select" id="database-client-selector"></select>
+                </div>
                 <p class="muted" id="database-client-meta"></p>
               </div>
               <button class="btn btn--primary" id="add-donor" type="button">New donor</button>
@@ -277,6 +281,14 @@
                 <label class="form-label" for="donor-biography">Biography</label>
                 <textarea class="input textarea" id="donor-biography" name="biography" rows="4"></textarea>
               </div>
+
+              <section class="donor-access" aria-labelledby="donor-assignments-heading">
+                <div class="donor-access__header">
+                  <h3 id="donor-assignments-heading">Client access</h3>
+                  <p class="muted">Choose which campaigns can see this donor in their call queue.</p>
+                </div>
+                <div id="donor-client-assignments" class="donor-access__list"></div>
+              </section>
 
               <section class="donor-history-editor" aria-labelledby="history-heading">
                 <header class="donor-history-editor__header">
