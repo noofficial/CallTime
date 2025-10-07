@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CallTime Desk</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="branding">
+          <span class="branding__logo" aria-hidden="true">☎︎</span>
+          <div>
+            <div class="branding__title">CallTime Desk</div>
+            <div class="branding__subtitle">Campaign call-time workspace</div>
+          </div>
+        </div>
+        <div class="topbar__actions">
+          <button class="btn btn--ghost" id="load-demo">
+            Load demo workspace
+          </button>
+          <button class="btn btn--ghost" id="open-database">
+            Donor database
+          </button>
+          <button class="btn" id="manage-clients">Manage clients</button>
+        </div>
+      </header>
+
+      <div class="layout">
+        <aside class="sidebar" aria-label="Client selector">
+          <div class="sidebar__header">
+            <h2>Clients</h2>
+            <button class="icon-btn" id="add-client" aria-label="Add client">
+              <span aria-hidden="true">＋</span>
+            </button>
+          </div>
+          <p class="sidebar__hint">Switch between campaigns with isolated notes.</p>
+          <ul class="client-list" id="client-list" role="list"></ul>
+        </aside>
+
+        <main class="workspace" id="workspace" tabindex="-1">
+          <section class="empty-state" id="empty-state">
+            <h1>Set up your first client</h1>
+            <p>
+              Connect a Google Sheet or upload donor data to create a dedicated
+              call-time desk for each campaign. Notes and outcomes are stored
+              locally and kept separate per client.
+            </p>
+            <div class="empty-state__actions">
+              <button class="btn btn--primary" id="empty-create">Add client</button>
+              <button class="btn btn--ghost" id="empty-demo">Preview demo</button>
+            </div>
+          </section>
+
+          <section class="client-dashboard hidden" id="client-dashboard">
+            <header class="client-dashboard__header">
+              <div>
+                <h1 id="client-name">Client Name</h1>
+                <p id="client-meta" class="muted"></p>
+              </div>
+              <div class="session-controls">
+                <button class="btn" id="refresh-donors">Refresh sheet</button>
+                <button class="btn btn--primary" id="start-session">
+                  Start call time
+                </button>
+                <button class="btn btn--ghost" id="manage-donors">
+                  Manage donor records
+                </button>
+              </div>
+            </header>
+
+            <div class="workspace__body">
+              <section class="donor-list" aria-labelledby="donor-list-title">
+                <div class="donor-list__header">
+                  <h2 id="donor-list-title">Donor queue</h2>
+                  <div class="donor-list__filters">
+                    <label class="sr-only" for="donor-search">Search donors</label>
+                    <input
+                      id="donor-search"
+                      class="input"
+                      type="search"
+                      placeholder="Search name, city, employer"
+                    />
+                    <label class="sr-only" for="status-filter">Filter by status</label>
+                    <select id="status-filter" class="input select">
+                      <option value="all">All outcomes</option>
+                    </select>
+                  </div>
+                </div>
+                <ul class="donor-items" id="donor-items" role="list"></ul>
+              </section>
+
+              <section class="donor-detail" aria-live="polite" id="donor-detail">
+                <div class="donor-detail__placeholder">
+                  Select a donor to review their profile and log call notes.
+                </div>
+              </section>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <dialog class="modal" id="client-dialog">
+      <form method="dialog" class="modal__content" id="client-form">
+        <header class="modal__header">
+          <h2 id="client-form-title">New client</h2>
+        </header>
+        <div class="modal__body">
+          <div class="form-row">
+            <label class="form-label" for="client-label">Client label</label>
+            <input
+              class="input"
+              id="client-label"
+              name="label"
+              placeholder="Jane for City Council"
+              required
+            />
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="client-candidate">Candidate name</label>
+            <input
+              class="input"
+              id="client-candidate"
+              name="candidate"
+              placeholder="Jane Candidate"
+            />
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="client-office">Office or race</label>
+            <input
+              class="input"
+              id="client-office"
+              name="office"
+              placeholder="City Council At-Large"
+            />
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="client-sheet"
+              >Google Sheet link (publish to web)</label
+            >
+            <input
+              class="input"
+              id="client-sheet"
+              name="sheet"
+              type="url"
+              placeholder="https://docs.google.com/spreadsheets/d/.../gviz/tq?tqx=out:json"
+            />
+            <p class="form-help">
+              Paste the <strong>gviz JSON</strong> or <strong>published CSV</strong>
+              link. Each row becomes a donor record.
+            </p>
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="client-timezone">Timezone</label>
+            <input
+              class="input"
+              id="client-timezone"
+              name="timezone"
+              placeholder="America/New_York"
+            />
+            <p class="form-help">
+              Used for scheduling reminders. Defaults to your browser timezone.
+            </p>
+          </div>
+        </div>
+        <footer class="modal__footer">
+          <button class="btn btn--ghost" value="cancel">Cancel</button>
+          <button class="btn btn--primary" value="confirm" id="save-client">
+            Save client
+          </button>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog class="modal modal--wide" id="donor-database">
+      <div class="modal__content modal__content--wide">
+        <header class="modal__header">
+          <h2>Donor database</h2>
+          <div class="modal__header-actions">
+            <button class="btn btn--ghost" id="export-donor-data" type="button">
+              Export JSON
+            </button>
+            <button class="icon-btn" id="close-donor-database" type="button" aria-label="Close donor database">
+              ×
+            </button>
+          </div>
+        </header>
+        <div class="modal__body database-panel">
+          <aside class="database-panel__list" aria-label="Donor records">
+            <div class="database-panel__list-header">
+              <div>
+                <h3 id="database-client-name">Client donors</h3>
+                <p class="muted" id="database-client-meta"></p>
+              </div>
+              <button class="btn btn--primary" id="add-donor" type="button">New donor</button>
+            </div>
+            <label class="sr-only" for="donor-database-search">Search donors</label>
+            <input
+              class="input"
+              id="donor-database-search"
+              type="search"
+              placeholder="Search donors"
+            />
+            <ul class="database-panel__items" id="donor-database-items" role="list"></ul>
+          </aside>
+          <section class="database-panel__editor" aria-live="polite">
+            <form id="donor-form" class="donor-form" autocomplete="off">
+              <fieldset class="form-grid">
+                <legend class="sr-only">Identity</legend>
+                <div class="form-row">
+                  <label class="form-label" for="donor-first-name">First name</label>
+                  <input class="input" id="donor-first-name" name="firstName" required />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="donor-last-name">Last name</label>
+                  <input class="input" id="donor-last-name" name="lastName" required />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="donor-email">Email</label>
+                  <input class="input" id="donor-email" name="email" type="email" placeholder="name@example.com" />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="donor-phone">Phone</label>
+                  <input class="input" id="donor-phone" name="phone" placeholder="(555) 123-4567" />
+                </div>
+              </fieldset>
+
+              <fieldset class="form-grid">
+                <legend class="sr-only">Professional details</legend>
+                <div class="form-row">
+                  <label class="form-label" for="donor-company">Company</label>
+                  <input class="input" id="donor-company" name="company" />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="donor-industry">Industry</label>
+                  <input class="input" id="donor-industry" name="industry" />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="donor-city">City</label>
+                  <input class="input" id="donor-city" name="city" />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="donor-tags">Tags</label>
+                  <input class="input" id="donor-tags" name="tags" placeholder="High Priority, Warm" />
+                </div>
+              </fieldset>
+
+              <fieldset class="form-grid">
+                <legend class="sr-only">Background</legend>
+                <div class="form-row">
+                  <label class="form-label" for="donor-picture">Picture URL</label>
+                  <input class="input" id="donor-picture" name="pictureUrl" type="url" placeholder="https://…" />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="donor-ask">Suggested ask</label>
+                  <input class="input" id="donor-ask" name="ask" type="number" min="0" step="25" />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="donor-last-gift">Last gift note</label>
+                  <input class="input" id="donor-last-gift" name="lastGift" placeholder="$1,000 (2023)" />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="donor-notes">Internal notes</label>
+                  <input class="input" id="donor-notes" name="notes" />
+                </div>
+              </fieldset>
+
+              <div class="form-row">
+                <label class="form-label" for="donor-biography">Biography</label>
+                <textarea class="input textarea" id="donor-biography" name="biography" rows="4"></textarea>
+              </div>
+
+              <section class="donor-history-editor" aria-labelledby="history-heading">
+                <header class="donor-history-editor__header">
+                  <div>
+                    <h3 id="history-heading">Donor history</h3>
+                    <p class="muted">Add election cycles and contribution amounts.</p>
+                  </div>
+                  <div class="history-add">
+                    <label class="sr-only" for="history-year">Election year</label>
+                    <input class="input" id="history-year" name="historyYear" type="number" min="1900" max="2100" placeholder="2024" />
+                    <label class="sr-only" for="history-candidate">Candidate</label>
+                    <input class="input" id="history-candidate" name="historyCandidate" placeholder="Candidate name" />
+                    <label class="sr-only" for="history-amount">Amount</label>
+                    <input class="input" id="history-amount" name="historyAmount" type="number" min="0" step="25" placeholder="500" />
+                    <button class="btn" type="button" id="add-history-entry">Add entry</button>
+                  </div>
+                </header>
+                <div id="history-list" class="history-groups"></div>
+              </section>
+
+              <footer class="modal__footer donor-form__footer">
+                <button class="btn btn--ghost" type="button" id="delete-donor">Delete donor</button>
+                <div class="donor-form__actions">
+                  <span class="muted" id="donor-updated"></span>
+                  <button class="btn btn--primary" type="submit">Save donor</button>
+                </div>
+              </footer>
+            </form>
+            <div class="donor-form__placeholder" id="donor-placeholder">
+              <h3>Select or create a donor</h3>
+              <p>Choose a donor from the list to begin editing their profile.</p>
+            </div>
+          </section>
+        </div>
+      </div>
+    </dialog>
+
+    <template id="donor-item-template">
+      <li class="donor-item">
+        <button type="button" class="donor-item__button"></button>
+      </li>
+    </template>
+
+    <script src="app.js" type="module"></script>
+  </body>
+</html>
