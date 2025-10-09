@@ -1,3 +1,7 @@
 node_modules/
 npm-debug.log
 .DS_Store
+
+# Ignore sqlite shared memory and write-ahead log files
+**/*.db-shm
+**/*.db-wal
