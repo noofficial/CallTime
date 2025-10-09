@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Manager Dashboard · CallTime Desk</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="workspace workspace--manager">
+  <header class="dashboard-header">
+    <div class="container">
+      <div class="header-content">
+        <div>
+          <p class="eyebrow">CallTime Desk</p>
+          <h1>Manager dashboard</h1>
+        </div>
+        <nav class="header-actions">
+          <a class="btn btn--ghost" href="index.html">Back to landing</a>
+          <a class="btn btn--outline" href="donors.html">Donor database</a>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="dashboard-grid manager-grid">
+      <article class="card span-2">
+        <div class="card__header">
+          <div>
+            <h2>Workspace health</h2>
+            <p class="muted">Snapshot of donors and active campaigns.</p>
+          </div>
+          <button class="btn btn--sm btn--outline" id="refresh-overview">Refresh</button>
+        </div>
+        <div class="card__body" id="manager-stats"></div>
+      </article>
+
+      <article class="card">
+        <div class="card__header">
+          <div>
+            <h2>Campaign clients</h2>
+            <p class="muted">Track progress across every active call program.</p>
+          </div>
+          <button
+            class="btn btn--sm btn--primary"
+            id="create-client"
+            type="button"
+            aria-expanded="false"
+            aria-controls="client-create-form"
+          >
+            New client
+          </button>
+        </div>
+        <div class="card__body">
+          <div id="client-form" class="client-form hidden" aria-hidden="true">
+            <form id="client-create-form" class="client-form__form" novalidate>
+              <div class="client-form__grid">
+                <div class="form-row">
+                  <label class="form-label" for="client-form-name">Campaign name</label>
+                  <input
+                    class="form-control"
+                    id="client-form-name"
+                    name="name"
+                    placeholder="Candidate for City Council"
+                    required
+                  />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="client-form-sheet">Data source URL</label>
+                  <input
+                    class="form-control"
+                    id="client-form-sheet"
+                    name="sheetUrl"
+                    type="url"
+                    placeholder="https://docs.google.com/..."
+                  />
+                  <p class="client-form__help">Optional link to Google Sheet or CSV export.</p>
+                </div>
+              </div>
+              <div class="client-form__actions">
+                <span class="client-form__status" id="client-form-status" role="status" aria-live="polite"></span>
+                <div class="client-form__buttons">
+                  <button class="btn btn--ghost" type="button" id="client-form-cancel">Cancel</button>
+                  <button class="btn btn--primary" type="submit" id="client-form-submit">Create client</button>
+                </div>
+              </div>
+            </form>
+          </div>
+          <div id="manager-clients" class="clients-grid"></div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card__header">
+          <div>
+            <h2>Donor database</h2>
+            <p class="muted">Review assignments and capacity at a glance.</p>
+          </div>
+          <div class="donor-controls">
+            <label class="sr-only" for="manager-donor-search">Search donors</label>
+            <input class="form-control" id="manager-donor-search" type="search" placeholder="Search donors by name, company, or city" autocomplete="off" />
+          </div>
+        </div>
+        <div class="card__body">
+          <div id="manager-donors" class="donors-grid donors-grid--table"></div>
+        </div>
+      </article>
+
+      <article class="card span-2">
+        <div class="card__header">
+          <div>
+            <h2>Assignments</h2>
+            <p class="muted">Drag donors between lists to update focus queues.</p>
+          </div>
+          <div class="assignment-controls">
+            <label class="sr-only" for="assignment-client">Select client</label>
+            <select class="form-control" id="assignment-client"></select>
+          </div>
+        </div>
+        <div class="card__body">
+          <div id="assignment-panel" class="assignment-grid">
+            <div class="assignment-column">
+              <div class="column-header" id="assignment-available-label">Available donors</div>
+              <div class="assignment-list" id="assignment-unassigned"></div>
+            </div>
+            <div class="assignment-column">
+              <div class="column-header" id="assignment-assigned-label">Assigned donors</div>
+              <div class="assignment-list" id="assignment-assigned"></div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <template id="donor-row-template">
+    <div class="donor-row">
+      <div class="donor-row__details">
+        <h3 class="donor-name"></h3>
+        <p class="donor-meta"></p>
+        <div class="donor-tags"></div>
+      </div>
+      <div class="donor-row__assignments"></div>
+    </div>
+  </template>
+
+  <script type="module" src="manager.js"></script>
+</body>
+</html>

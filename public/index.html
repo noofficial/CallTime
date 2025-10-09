@@ -1,277 +1,45 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Campaign Call Time Management System</title>
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CallTime Desk · Campaign Call Time Management</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
-<body>
-    <!-- Login Screen -->
-    <div id="login-screen" class="screen active">
-        <div class="login-container">
-            <div class="card">
-                <div class="card__body">
-                    <h1>Campaign Call Time System</h1>
-                    <p>Select your role to continue</p>
-                    <div class="login-buttons">
-                        <button class="btn btn--primary btn--lg btn--full-width" onclick="app.showLogin('manager')">
-                            Manager Dashboard
-                        </button>
-                        <button class="btn btn--secondary btn--lg btn--full-width" onclick="app.showLogin('client')">
-                            Client Portal
-                        </button>
-                    </div>
-                </div>
-            </div>
+<body class="landing-screen">
+  <header class="landing-header">
+    <div class="container">
+      <div class="landing-header__content">
+        <div>
+          <p class="eyebrow">CallTime Desk</p>
+          <h1>Campaign call time workspace</h1>
+          <p class="muted">Manage every donor relationship from one secure workspace. Choose how you want to work today.</p>
         </div>
+        <a class="btn btn--ghost" href="donors.html">View donor database</a>
+      </div>
     </div>
+  </header>
 
-    <!-- Manager Dashboard -->
-    <div id="manager-screen" class="screen">
-        <header class="dashboard-header">
-            <div class="container">
-                <div class="header-content">
-                    <h1>Manager Dashboard</h1>
-                    <button class="btn btn--outline" onclick="app.logout()">Logout</button>
-                </div>
-            </div>
-        </header>
+  <main class="landing-main">
+    <div class="container">
+      <div class="landing-options">
+        <article class="card landing-card">
+          <div class="card__body">
+            <h2>Manager dashboard</h2>
+            <p>Assign donors to candidate clients, review performance, and keep the master database organized.</p>
+            <a class="btn btn--primary btn--lg" href="manager.html">Open manager workspace</a>
+          </div>
+        </article>
 
-        <div class="container">
-            <div class="dashboard-grid">
-                <!-- Client Overview -->
-                <div class="card">
-                    <div class="card__header">
-                        <h3>Campaign Clients</h3>
-                        <button class="btn btn--sm btn--primary" onclick="app.showModal('add-client-modal')">Add Client</button>
-                    </div>
-                    <div class="card__body">
-                        <div id="clients-list" class="clients-grid"></div>
-                    </div>
-                </div>
-
-                <!-- Donor Management -->
-                <div class="card">
-                    <div class="card__header">
-                        <h3>Donor Database</h3>
-                        <button class="btn btn--sm btn--primary" onclick="app.showModal('add-donor-modal')">Add Donor</button>
-                    </div>
-                    <div class="card__body">
-                        <div class="donor-controls">
-                            <input type="text" id="donor-search" class="form-control" placeholder="Search donors...">
-                        </div>
-                        <div id="donors-list" class="donors-grid"></div>
-                    </div>
-                </div>
-
-                <!-- Assignment Interface -->
-                <div class="card assignment-card">
-                    <div class="card__header">
-                        <h3>Donor Assignments</h3>
-                    </div>
-                    <div class="card__body">
-                        <div class="assignment-controls">
-                            <select id="assignment-client" class="form-control">
-                                <option value="">Select Client</option>
-                            </select>
-                            <button class="btn btn--primary" onclick="app.showAssignmentInterface()">Manage Assignments</button>
-                        </div>
-                        <div id="assignment-interface" class="assignment-interface hidden"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <article class="card landing-card">
+          <div class="card__body">
+            <h2>Client call portal</h2>
+            <p>Access your call queue, review donor research, and log call outcomes that stay private to your campaign.</p>
+            <a class="btn btn--secondary btn--lg" href="client.html">Open client portal</a>
+          </div>
+        </article>
+      </div>
     </div>
-
-    <!-- Client Portal -->
-    <div id="client-screen" class="screen">
-        <header class="dashboard-header">
-            <div class="container">
-                <div class="header-content">
-                    <h1 id="client-title">Client Portal</h1>
-                    <div class="header-actions">
-                        <span id="client-stats" class="status status--info"></span>
-                        <button class="btn btn--outline" onclick="app.logout()">Logout</button>
-                    </div>
-                </div>
-            </div>
-        </header>
-
-        <div class="container">
-            <div class="client-interface">
-                <!-- Call Queue -->
-                <div class="card">
-                    <div class="card__header">
-                        <h3>Call Queue</h3>
-                        <div class="call-controls">
-                            <button class="btn btn--sm btn--primary" onclick="app.startCallSession()">Start Call Session</button>
-                            <select id="queue-filter" class="form-control">
-                                <option value="all">All Donors</option>
-                                <option value="not-contacted">Not Contacted</option>
-                                <option value="follow-up">Needs Follow-up</option>
-                                <option value="interested">Interested</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="card__body">
-                        <div id="call-queue" class="call-queue"></div>
-                    </div>
-                </div>
-
-                <!-- Donor Details -->
-                <div id="donor-details" class="card donor-details-card hidden">
-                    <div class="card__header">
-                        <h3>Donor Information</h3>
-                        <button class="btn btn--sm btn--outline" onclick="app.closeDonorDetails()">Close</button>
-                    </div>
-                    <div class="card__body">
-                        <div id="donor-info" class="donor-info"></div>
-                        <div class="call-outcome-section">
-                            <h4>Record Call Outcome</h4>
-                            <div class="form-group">
-                                <select id="call-status" class="form-control">
-                                    <option value="">Select outcome...</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">Ask Amount ($)</label>
-                                <input type="number" id="ask-amount" class="form-control" placeholder="0">
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">Committed Amount ($)</label>
-                                <input type="number" id="committed-amount" class="form-control" placeholder="0">
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">Call Notes</label>
-                                <textarea id="call-notes" class="form-control" rows="3" placeholder="Private notes for this call..."></textarea>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">Follow-up Date</label>
-                                <input type="date" id="followup-date" class="form-control">
-                            </div>
-                            <button class="btn btn--primary" onclick="app.recordCallOutcome()">Save Call Outcome</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modals -->
-    <div id="add-client-modal" class="modal hidden">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Add Campaign Client</h3>
-                <button class="modal-close" onclick="app.hideModal('add-client-modal')">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label class="form-label">Campaign Name</label>
-                    <input type="text" id="client-name" class="form-control" placeholder="e.g., Martinez for Senate">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Candidate Name</label>
-                    <input type="text" id="candidate-name" class="form-control" placeholder="e.g., Maria Martinez">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Office</label>
-                    <input type="text" id="client-office" class="form-control" placeholder="e.g., U.S. Senate">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Contact Email</label>
-                    <input type="email" id="client-contact" class="form-control" placeholder="campaign@candidate.com">
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn--outline" onclick="app.hideModal('add-client-modal')">Cancel</button>
-                <button class="btn btn--primary" onclick="app.addClient()">Add Client</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="add-donor-modal" class="modal hidden">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Add Donor</h3>
-                <button class="modal-close" onclick="app.hideModal('add-donor-modal')">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label class="form-label">First Name</label>
-                        <input type="text" id="donor-first-name" class="form-control">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Last Name</label>
-                        <input type="text" id="donor-last-name" class="form-control">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Email</label>
-                    <input type="email" id="donor-email" class="form-control">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Phone</label>
-                    <input type="tel" id="donor-phone" class="form-control">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Company</label>
-                    <input type="text" id="donor-company" class="form-control">
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label class="form-label">City</label>
-                        <input type="text" id="donor-city" class="form-control">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Industry</label>
-                        <input type="text" id="donor-industry" class="form-control">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label class="form-label">Capacity ($)</label>
-                        <input type="number" id="donor-capacity" class="form-control">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Last Gift</label>
-                        <input type="text" id="donor-last-gift" class="form-control" placeholder="e.g., $500 (2023)">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Tags (comma-separated)</label>
-                    <input type="text" id="donor-tags" class="form-control" placeholder="e.g., Tech Industry, High Capacity">
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn--outline" onclick="app.hideModal('add-donor-modal')">Cancel</button>
-                <button class="btn btn--primary" onclick="app.addDonor()">Add Donor</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="client-login-modal" class="modal hidden">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Select Client</h3>
-                <button class="modal-close" onclick="app.hideModal('client-login-modal')">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label class="form-label">Choose your campaign:</label>
-                    <select id="client-selector" class="form-control">
-                        <option value="">Select a client...</option>
-                    </select>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn--outline" onclick="app.hideModal('client-login-modal')">Cancel</button>
-                <button class="btn btn--primary" onclick="app.loginAsClient()">Continue</button>
-            </div>
-        </div>
-    </div>
-
-    <script src="app.js"></script>
+  </main>
 </body>
 </html>

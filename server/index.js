@@ -12,30 +12,76 @@ app.use(express.json())
 app.use(express.static(path.join(__dirname, '..', 'public')))
 
 // Database can be in either server/ or data/ directory - let's check both
-let dbPath;
 const serverDbPath = path.join(__dirname, 'campaign.db')
 const dataDbPath = path.join(__dirname, '..', 'data', 'campaign.db')
 
-if (fs.existsSync(serverDbPath)) {
-    dbPath = serverDbPath
-    console.log('Using database from server directory:', dbPath)
-} else if (fs.existsSync(dataDbPath)) {
-    dbPath = dataDbPath
-    console.log('Using database from data directory:', dbPath)
-} else {
+const candidateDatabases = [
+    { path: dataDbPath, label: 'data directory' },
+    { path: serverDbPath, label: 'server directory' }
+]
+
+let db
+let dbPath
+
+const openDatabase = () => {
+    let fallback = null
+
+    for (const candidate of candidateDatabases) {
+        if (!fs.existsSync(candidate.path)) {
+            continue
+        }
+
+        try {
+            const connection = new Database(candidate.path)
+            const hasClientsTable = connection.prepare(`
+                SELECT name FROM sqlite_master
+                WHERE type = 'table' AND name = 'clients'
+            `).get()
+            const hasDonorsTable = connection.prepare(`
+                SELECT name FROM sqlite_master
+                WHERE type = 'table' AND name = 'donors'
+            `).get()
+
+            if (hasClientsTable && hasDonorsTable) {
+                console.log(`Using database from ${candidate.label}:`, candidate.path)
+                return { connection, path: candidate.path }
+            }
+
+            if (!fallback) {
+                console.warn(`Database at ${candidate.path} is missing expected tables. Marking as fallback.`)
+                fallback = { connection, path: candidate.path, label: candidate.label }
+            } else {
+                connection.close()
+            }
+        } catch (error) {
+            console.error(`Failed to open database at ${candidate.path}:`, error.message)
+        }
+    }
+
+    if (fallback) {
+        console.warn(`Falling back to database from ${fallback.label}: ${fallback.path}`)
+        return { connection: fallback.connection, path: fallback.path }
+    }
+
+    return null
+}
+
+const selectedDatabase = openDatabase()
+
+if (!selectedDatabase) {
     console.error('No campaign.db found in server/ or data/ directories')
-    console.log('Checked paths:', [serverDbPath, dataDbPath])
+    console.log('Checked paths:', candidateDatabases.map(db => db.path))
     process.exit(1)
 }
 
-let db;
+db = selectedDatabase.connection
+dbPath = selectedDatabase.path
+
 try {
-    db = new Database(dbPath)
     db.pragma('journal_mode = WAL')
     console.log('Connected to database successfully')
 } catch (error) {
-    console.error('Database connection failed:', error.message)
-    process.exit(1)
+    console.warn('Connected to database but failed to enable WAL mode:', error.message)
 }
 
 // Enhanced schema for improved call time management
