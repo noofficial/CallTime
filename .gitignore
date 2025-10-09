@@ -5,3 +5,4 @@ npm-debug.log
 # Ignore sqlite shared memory and write-ahead log files
 **/campaign.db-shm
 **/campaign.db-wal
+**/campaign.db
