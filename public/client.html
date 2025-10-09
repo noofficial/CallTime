@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Client Call Portal · CallTime Desk</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="workspace workspace--client">
+  <header class="dashboard-header">
+    <div class="container">
+      <div class="header-content">
+        <div>
+          <p class="eyebrow">CallTime Desk</p>
+          <h1 id="client-title">Client call portal</h1>
+        </div>
+        <div class="header-actions">
+          <select class="form-control" id="client-selector"></select>
+          <a class="btn btn--ghost" href="index.html">Switch workspace</a>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="client-interface">
+      <article class="card">
+        <div class="card__header">
+          <div>
+            <h2>Call queue</h2>
+            <p class="muted">Tap a donor to review research and log an outcome.</p>
+          </div>
+          <div class="call-controls">
+            <button class="btn btn--sm btn--primary" id="start-session">Start call session</button>
+            <select class="form-control" id="queue-filter">
+              <option value="all">All donors</option>
+              <option value="not-contacted">Not contacted</option>
+              <option value="interested">Interested</option>
+              <option value="follow-up">Needs follow-up</option>
+            </select>
+          </div>
+        </div>
+        <div class="card__body">
+          <div id="client-stats" class="status status--info"></div>
+          <div id="call-queue" class="call-queue"></div>
+        </div>
+      </article>
+
+      <article class="card donor-details-card hidden" id="donor-card">
+        <div class="card__header">
+          <h2 id="donor-name">Donor details</h2>
+          <button class="btn btn--sm btn--outline" id="close-donor">Close</button>
+        </div>
+        <div class="card__body">
+          <section id="donor-info" class="donor-info"></section>
+          <section class="call-outcome-section">
+            <h3>Record call outcome</h3>
+            <div class="form-group">
+              <label class="form-label" for="call-status">Outcome</label>
+              <select class="form-control" id="call-status"></select>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label" for="ask-amount">Ask amount ($)</label>
+                <input class="form-control" id="ask-amount" type="number" min="0" step="50" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="committed-amount">Committed ($)</label>
+                <input class="form-control" id="committed-amount" type="number" min="0" step="50" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="call-notes">Call notes</label>
+              <textarea class="form-control" id="call-notes" rows="4" placeholder="Private notes from this conversation."></textarea>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="followup-date">Follow-up date</label>
+              <input class="form-control" id="followup-date" type="date" />
+            </div>
+            <button class="btn btn--primary" id="save-outcome">Save outcome</button>
+            <div id="outcome-status" class="muted"></div>
+          </section>
+          <section class="call-history" id="call-history"></section>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <script type="module" src="client.js"></script>
+</body>
+</html>
