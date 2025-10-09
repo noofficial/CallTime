@@ -200,7 +200,10 @@ function renderClients() {
           <h3 class="client-name">${client.name || "Unnamed campaign"}</h3>
           <p class="client-office">${client.candidate || "Candidate pending"}${client.office ? ` • ${client.office}` : ""}</p>
         </div>
-        <button class="btn btn--sm btn--outline" data-client-id="${client.id}">Manage queue</button>
+        <div class="client-actions">
+          <button class="btn btn--sm btn--outline" data-action="manage" data-client-id="${client.id}">Manage queue</button>
+          <button class="btn btn--sm btn--danger" data-action="delete" data-client-id="${client.id}">Delete</button>
+        </div>
       </div>
       <div class="client-stats">
         <div class="stat-item">
@@ -222,12 +225,20 @@ function renderClients() {
       </div>
     `;
 
-    card.querySelector("button")?.addEventListener("click", () => {
-      if (!elements.assignmentClient) return;
-      elements.assignmentClient.value = client.id;
-      elements.assignmentClient.dispatchEvent(new Event("change"));
-      window.scrollTo({ top: elements.assignmentClient.offsetTop - 80, behavior: "smooth" });
-    });
+    card
+      .querySelector('[data-action="manage"]')
+      ?.addEventListener("click", () => {
+        if (!elements.assignmentClient) return;
+        elements.assignmentClient.value = client.id;
+        elements.assignmentClient.dispatchEvent(new Event("change"));
+        window.scrollTo({ top: elements.assignmentClient.offsetTop - 80, behavior: "smooth" });
+      });
+
+    card
+      .querySelector('[data-action="delete"]')
+      ?.addEventListener("click", () => {
+        handleDeleteClient(client.id);
+      });
 
     container.append(card);
   });
@@ -292,6 +303,7 @@ function renderDonors() {
       </div>
       <div class="donor-actions">
         <span class="status status--info">${assignments.length} assigned</span>
+        <button class="btn btn--sm btn--danger" data-delete-donor-id="${donor.id}">Delete</button>
       </div>
     `;
 
@@ -305,6 +317,13 @@ function renderDonors() {
       });
       row.querySelector(".donor-actions")?.append(list);
     }
+
+    row
+      .querySelector("[data-delete-donor-id]")
+      ?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        handleDeleteDonor(donor.id);
+      });
 
     container.append(row);
   });
@@ -392,6 +411,55 @@ function renderAssignmentLists() {
     assignedList.forEach((donor) => {
       assignedContainer.append(renderAssignmentCard(donor, "unassign"));
     });
+  }
+}
+
+async function handleDeleteClient(clientId) {
+  const client = state.clients.find((item) => String(item.id) === String(clientId));
+  const label = client?.name || client?.candidate || "this client";
+  const confirmed = window.confirm(
+    `Delete ${label}? This will remove the client and any related call records. This action cannot be undone.`,
+  );
+  if (!confirmed) return;
+
+  try {
+    const response = await fetch(`/api/clients/${clientId}`, { method: "DELETE" });
+    if (!response.ok) throw new Error("Unable to delete client");
+
+    if (String(state.selectedClientId) === String(clientId)) {
+      state.selectedClientId = "";
+      state.selectedClientName = "";
+      state.assignedIds = new Set();
+      state.assignedDonors = new Map();
+      if (elements.assignmentClient) {
+        elements.assignmentClient.value = "";
+      }
+    }
+
+    await loadOverview();
+    await loadDonors();
+  } catch (error) {
+    reportError(error);
+  }
+}
+
+async function handleDeleteDonor(donorId) {
+  const donor = state.donors.find((item) => String(item.id) === String(donorId));
+  const name =
+    donor?.name || `${donor?.first_name || ""} ${donor?.last_name || ""}`.trim() || "this donor";
+  const confirmed = window.confirm(
+    `Delete ${name}? This will remove the donor and all related history. This action cannot be undone.`,
+  );
+  if (!confirmed) return;
+
+  try {
+    const response = await fetch(`/api/donors/${donorId}`, { method: "DELETE" });
+    if (!response.ok) throw new Error("Unable to delete donor");
+
+    await loadOverview();
+    await loadDonors();
+  } catch (error) {
+    reportError(error);
   }
 }
 

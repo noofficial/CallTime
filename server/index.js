@@ -78,6 +78,12 @@ db = selectedDatabase.connection
 dbPath = selectedDatabase.path
 
 try {
+    db.pragma('foreign_keys = ON')
+} catch (error) {
+    console.warn('Failed to enable foreign key enforcement:', error.message)
+}
+
+try {
     db.pragma('journal_mode = WAL')
     console.log('Connected to database successfully')
 } catch (error) {
@@ -515,11 +521,36 @@ app.post('/api/clients', (req, res) => {
 
     try {
         const stmt = db.prepare(`
-            INSERT INTO clients(name, sheet_url) 
+            INSERT INTO clients(name, sheet_url)
             VALUES (?, ?)
         `)
         const result = stmt.run(name, sheet_url)
         res.json({ id: result.lastInsertRowid })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+})
+
+app.delete('/api/clients/:clientId', (req, res) => {
+    const clientId = req.params.clientId
+
+    try {
+        const existing = db.prepare('SELECT id FROM clients WHERE id = ?').get(clientId)
+        if (!existing) {
+            return res.status(404).json({ error: 'Client not found' })
+        }
+
+        const removeClient = db.transaction((id) => {
+            db.prepare('DELETE FROM donor_assignments WHERE client_id = ?').run(id)
+            db.prepare('DELETE FROM client_donor_research WHERE client_id = ?').run(id)
+            db.prepare('DELETE FROM client_donor_notes WHERE client_id = ?').run(id)
+            db.prepare('DELETE FROM call_outcomes WHERE client_id = ?').run(id)
+            db.prepare('DELETE FROM call_sessions WHERE client_id = ?').run(id)
+            db.prepare('DELETE FROM clients WHERE id = ?').run(id)
+        })
+
+        removeClient(clientId)
+        res.json({ success: true })
     } catch (error) {
         res.status(500).json({ error: error.message })
     }
@@ -565,6 +596,31 @@ app.post('/api/clients/:clientId/donors', (req, res) => {
         assignStmt.run(c, donorResult.lastInsertRowid, 'auto-assign')
 
         res.json({ id: donorResult.lastInsertRowid })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+})
+
+app.delete('/api/donors/:donorId', (req, res) => {
+    const donorId = req.params.donorId
+
+    try {
+        const existing = db.prepare('SELECT id FROM donors WHERE id = ?').get(donorId)
+        if (!existing) {
+            return res.status(404).json({ error: 'Donor not found' })
+        }
+
+        const removeDonor = db.transaction((id) => {
+            db.prepare('DELETE FROM donor_assignments WHERE donor_id = ?').run(id)
+            db.prepare('DELETE FROM client_donor_research WHERE donor_id = ?').run(id)
+            db.prepare('DELETE FROM client_donor_notes WHERE donor_id = ?').run(id)
+            db.prepare('DELETE FROM call_outcomes WHERE donor_id = ?').run(id)
+            db.prepare('DELETE FROM giving_history WHERE donor_id = ?').run(id)
+            db.prepare('DELETE FROM donors WHERE id = ?').run(id)
+        })
+
+        removeDonor(donorId)
+        res.json({ success: true })
     } catch (error) {
         res.status(500).json({ error: error.message })
     }
