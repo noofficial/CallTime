@@ -589,10 +589,11 @@ app.post('/api/donors/:donorId/interactions', (req, res) => {
     }
 })
 
-// Fallback route - serve index.html for any unmatched routes (SPA support)
-app.get('*', (req, res) => {
+// Handle all other routes by serving the index.html file (SPA support)
+// This replaces the problematic app.get('*', ...) route
+app.use((req, res) => {
     const indexPath = path.join(__dirname, '..', 'public', 'index.html')
-    console.log('Fallback route triggered, looking for:', indexPath)
+    console.log('Catch-all route triggered for:', req.url, 'looking for:', indexPath)
     if (fs.existsSync(indexPath)) {
         res.sendFile(indexPath)
     } else {
