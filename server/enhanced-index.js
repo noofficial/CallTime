@@ -8,13 +8,35 @@ const app = express()
 app.use(cors())
 app.use(express.json())
 
-// Serve static files
-app.use(express.static(path.join(__dirname, 'public')))
+// Serve static files from the public directory
+app.use(express.static(path.join(__dirname, '..', 'public')))
 
-// Connect to existing campaign.db
-const dbPath = path.join(__dirname, 'campaign.db')
-const db = new Database(dbPath)
-db.pragma('journal_mode = WAL')
+// Database can be in either server/ or data/ directory - let's check both
+let dbPath;
+const serverDbPath = path.join(__dirname, 'campaign.db')
+const dataDbPath = path.join(__dirname, '..', 'data', 'campaign.db')
+
+if (fs.existsSync(serverDbPath)) {
+    dbPath = serverDbPath
+    console.log('Using database from server directory:', dbPath)
+} else if (fs.existsSync(dataDbPath)) {
+    dbPath = dataDbPath
+    console.log('Using database from data directory:', dbPath)
+} else {
+    console.error('No campaign.db found in server/ or data/ directories')
+    console.log('Checked paths:', [serverDbPath, dataDbPath])
+    process.exit(1)
+}
+
+let db;
+try {
+    db = new Database(dbPath)
+    db.pragma('journal_mode = WAL')
+    console.log('Connected to database successfully')
+} catch (error) {
+    console.error('Database connection failed:', error.message)
+    process.exit(1)
+}
 
 // Enhanced schema for improved call time management
 const enhanceSchema = () => {
@@ -442,15 +464,15 @@ app.get('/api/clients', (req, res) => {
 
 // Create client
 app.post('/api/clients', (req, res) => {
-    const { name, candidate, office, contact } = req.body || {}
+    const { name, sheet_url } = req.body || {}
     if (!name) return res.status(400).json({ error: 'name required' })
 
     try {
         const stmt = db.prepare(`
-            INSERT INTO clients(name, candidate, office, contact) 
-            VALUES (?, ?, ?, ?)
+            INSERT INTO clients(name, sheet_url) 
+            VALUES (?, ?)
         `)
-        const result = stmt.run(name, candidate, office, contact)
+        const result = stmt.run(name, sheet_url)
         res.json({ id: result.lastInsertRowid })
     } catch (error) {
         res.status(500).json({ error: error.message })
@@ -459,14 +481,18 @@ app.post('/api/clients', (req, res) => {
 
 // Enhanced donors endpoint with assignment info
 app.get('/api/clients/:clientId/donors-legacy', (req, res) => {
-    const stmt = db.prepare(`
-        SELECT d.*, da.assigned_date, da.priority_level
-        FROM donors d
-        JOIN donor_assignments da ON d.id = da.donor_id
-        WHERE da.client_id = ? AND da.is_active = 1
-        ORDER BY da.priority_level DESC, d.created_at DESC
-    `)
-    res.json(stmt.all(req.params.clientId))
+    try {
+        const stmt = db.prepare(`
+            SELECT d.*, da.assigned_date, da.priority_level
+            FROM donors d
+            JOIN donor_assignments da ON d.id = da.donor_id
+            WHERE da.client_id = ? AND da.is_active = 1
+            ORDER BY da.priority_level DESC, d.created_at DESC
+        `)
+        res.json(stmt.all(req.params.clientId))
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
 })
 
 // Create donor
@@ -526,15 +552,19 @@ app.get('/api/donors/:donorId/interactions', (req, res) => {
     const { clientId } = req.query
     let stmt, params
 
-    if (clientId) {
-        stmt = db.prepare('SELECT * FROM call_outcomes WHERE donor_id = ? AND client_id = ? ORDER BY call_date DESC')
-        params = [req.params.donorId, clientId]
-    } else {
-        stmt = db.prepare('SELECT * FROM call_outcomes WHERE donor_id = ? ORDER BY call_date DESC')
-        params = [req.params.donorId]
-    }
+    try {
+        if (clientId) {
+            stmt = db.prepare('SELECT * FROM call_outcomes WHERE donor_id = ? AND client_id = ? ORDER BY call_date DESC')
+            params = [req.params.donorId, clientId]
+        } else {
+            stmt = db.prepare('SELECT * FROM call_outcomes WHERE donor_id = ? ORDER BY call_date DESC')
+            params = [req.params.donorId]
+        }
 
-    res.json(stmt.all(...params))
+        res.json(stmt.all(...params))
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
 })
 
 // Legacy interaction creation (maps to call_outcomes)
@@ -559,13 +589,41 @@ app.post('/api/donors/:donorId/interactions', (req, res) => {
     }
 })
 
-// Fallback to index.html for SPA routes
-app.use((req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'))
+// Fallback route - serve index.html for any unmatched routes (SPA support)
+app.get('*', (req, res) => {
+    const indexPath = path.join(__dirname, '..', 'public', 'index.html')
+    console.log('Fallback route triggered, looking for:', indexPath)
+    if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath)
+    } else {
+        res.status(404).send(`
+            <h1>File Not Found</h1>
+            <p>Looking for index.html at: ${indexPath}</p>
+            <p>Please ensure your index.html file is in the 'public' directory.</p>
+            <p>Current server directory: ${__dirname}</p>
+            <p>Static files served from: ${path.join(__dirname, '..', 'public')}</p>
+        `)
+    }
 })
 
 const port = process.env.PORT || 3000
 app.listen(port, () => {
     console.log(`Enhanced Campaign Call Time System running at http://localhost:${port}`)
+    console.log(`Server directory: ${__dirname}`)
+    console.log(`Static files served from: ${path.join(__dirname, '..', 'public')}`)
     console.log(`Database: ${dbPath}`)
+
+    // Check if files exist
+    const publicDir = path.join(__dirname, '..', 'public')
+    const indexFile = path.join(publicDir, 'index.html')
+
+    console.log('\nFile check:')
+    console.log(`Public directory exists: ${fs.existsSync(publicDir)}`)
+    console.log(`index.html exists: ${fs.existsSync(indexFile)}`)
+    console.log(`Database file exists: ${fs.existsSync(dbPath)}`)
+
+    if (fs.existsSync(publicDir)) {
+        const files = fs.readdirSync(publicDir)
+        console.log(`Files in public directory: ${files.join(', ')}`)
+    }
 })
