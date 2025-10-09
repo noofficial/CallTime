@@ -8,6 +8,7 @@ const state = {
   assignedDonors: new Map(),
   assignedIds: new Set(),
   loadingAssignments: false,
+  isClientFormVisible: false,
 };
 
 const elements = {
@@ -22,6 +23,13 @@ const elements = {
   assignmentAssignedLabel: document.getElementById("assignment-assigned-label"),
   refresh: document.getElementById("refresh-overview"),
   createClient: document.getElementById("create-client"),
+  clientFormContainer: document.getElementById("client-form"),
+  clientForm: document.getElementById("client-create-form"),
+  clientFormName: document.getElementById("client-form-name"),
+  clientFormSheet: document.getElementById("client-form-sheet"),
+  clientFormCancel: document.getElementById("client-form-cancel"),
+  clientFormStatus: document.getElementById("client-form-status"),
+  clientFormSubmit: document.getElementById("client-form-submit"),
 };
 
 init();
@@ -68,7 +76,16 @@ function bindEvents() {
   });
 
   elements.createClient?.addEventListener("click", () => {
-    handleCreateClient();
+    toggleClientForm(!state.isClientFormVisible);
+  });
+
+  elements.clientFormCancel?.addEventListener("click", () => {
+    toggleClientForm(false);
+  });
+
+  elements.clientForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    handleCreateClientSubmit();
   });
 }
 
@@ -421,10 +438,24 @@ async function unassignDonor(clientId, donorId) {
   }
 }
 
-async function handleCreateClient() {
-  const name = window.prompt("Campaign name");
-  if (!name) return;
-  const sheetUrl = window.prompt("Data source URL (optional)") || "";
+async function handleCreateClientSubmit() {
+  const form = elements.clientForm;
+  if (!form) return;
+  if (!form.reportValidity()) {
+    return;
+  }
+
+  const name = elements.clientFormName?.value.trim() || "";
+  const sheetUrl = elements.clientFormSheet?.value.trim() || "";
+  if (!name) {
+    setClientFormStatus("Campaign name is required.", "error");
+    elements.clientFormName?.focus();
+    return;
+  }
+
+  setClientFormBusy(true);
+  setClientFormStatus("Saving…");
+
   try {
     const response = await fetch("/api/clients", {
       method: "POST",
@@ -433,13 +464,63 @@ async function handleCreateClient() {
     });
     if (!response.ok) throw new Error("Unable to create client");
     await loadOverview();
-    window.alert("Client created successfully.");
+    form.reset();
+    setClientFormStatus("Client created successfully.", "success");
+    elements.clientFormName?.focus();
   } catch (error) {
-    reportError(error);
+    setClientFormStatus(error.message || "Unable to create client.", "error");
+  } finally {
+    setClientFormBusy(false);
   }
 }
 
 function reportError(error) {
   console.error(error);
   window.alert(error.message || "An unexpected error occurred.");
+}
+
+function toggleClientForm(shouldShow) {
+  if (!elements.clientFormContainer || !elements.createClient) return;
+  if (shouldShow) {
+    elements.clientFormContainer.classList.remove("hidden");
+    elements.clientFormContainer.setAttribute("aria-hidden", "false");
+    elements.createClient.setAttribute("aria-expanded", "true");
+    elements.clientForm?.reset();
+    setClientFormBusy(false);
+    setClientFormStatus("");
+    state.isClientFormVisible = true;
+    window.requestAnimationFrame(() => {
+      elements.clientFormName?.focus();
+    });
+  } else {
+    elements.clientFormContainer.classList.add("hidden");
+    elements.clientFormContainer.setAttribute("aria-hidden", "true");
+    elements.createClient.setAttribute("aria-expanded", "false");
+    elements.clientForm?.reset();
+    setClientFormStatus("");
+    state.isClientFormVisible = false;
+  }
+}
+
+function setClientFormBusy(isBusy) {
+  if (elements.clientFormSubmit) {
+    elements.clientFormSubmit.disabled = isBusy;
+    elements.clientFormSubmit.textContent = isBusy ? "Saving…" : "Create client";
+  }
+  if (elements.clientFormCancel) {
+    elements.clientFormCancel.disabled = isBusy;
+  }
+  if (elements.createClient) {
+    elements.createClient.disabled = isBusy;
+  }
+}
+
+function setClientFormStatus(message = "", tone = "info") {
+  const status = elements.clientFormStatus;
+  if (!status) return;
+  status.textContent = message;
+  status.className = "client-form__status";
+  if (message && tone !== "info") {
+    status.classList.add(`client-form__status--${tone}`);
+  }
 }

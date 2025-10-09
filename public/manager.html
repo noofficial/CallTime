@@ -41,9 +41,51 @@
             <h2>Campaign clients</h2>
             <p class="muted">Track progress across every active call program.</p>
           </div>
-          <button class="btn btn--sm btn--primary" id="create-client">New client</button>
+          <button
+            class="btn btn--sm btn--primary"
+            id="create-client"
+            type="button"
+            aria-expanded="false"
+            aria-controls="client-create-form"
+          >
+            New client
+          </button>
         </div>
         <div class="card__body">
+          <div id="client-form" class="client-form hidden" aria-hidden="true">
+            <form id="client-create-form" class="client-form__form" novalidate>
+              <div class="client-form__grid">
+                <div class="form-row">
+                  <label class="form-label" for="client-form-name">Campaign name</label>
+                  <input
+                    class="form-control"
+                    id="client-form-name"
+                    name="name"
+                    placeholder="Candidate for City Council"
+                    required
+                  />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="client-form-sheet">Data source URL</label>
+                  <input
+                    class="form-control"
+                    id="client-form-sheet"
+                    name="sheetUrl"
+                    type="url"
+                    placeholder="https://docs.google.com/..."
+                  />
+                  <p class="client-form__help">Optional link to Google Sheet or CSV export.</p>
+                </div>
+              </div>
+              <div class="client-form__actions">
+                <span class="client-form__status" id="client-form-status" role="status" aria-live="polite"></span>
+                <div class="client-form__buttons">
+                  <button class="btn btn--ghost" type="button" id="client-form-cancel">Cancel</button>
+                  <button class="btn btn--primary" type="submit" id="client-form-submit">Create client</button>
+                </div>
+              </div>
+            </form>
+          </div>
           <div id="manager-clients" class="clients-grid"></div>
         </div>
       </article>
