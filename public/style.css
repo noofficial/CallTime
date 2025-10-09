@@ -916,6 +916,17 @@ textarea.input {
     margin-bottom: var(--space-8);
 }
 
+.client-actions {
+    display: flex;
+    gap: var(--space-8);
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.client-actions .btn {
+    white-space: nowrap;
+}
+
 .client-name {
     font-weight: var(--font-weight-semibold);
     font-size: var(--font-size-lg);
@@ -1014,6 +1025,12 @@ textarea.input {
 .donor-actions {
     display: flex;
     gap: var(--space-8);
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.donor-actions .btn {
+    white-space: nowrap;
 }
 
 /* Assignment Interface */
