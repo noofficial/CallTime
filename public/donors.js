@@ -1,3 +1,9 @@
+import {
+  configureDonorEditor,
+  refreshDonorEditorClients,
+  resetDonorEditorForm,
+} from "./donor-editor.js";
+
 const state = {
   donors: [],
   filtered: [],
@@ -20,7 +26,27 @@ const elements = {
   detail: document.getElementById("database-detail"),
   empty: document.getElementById("database-empty"),
   export: document.getElementById("export-donors"),
+  newDonorButton: document.getElementById("open-donor-modal"),
 };
+
+const modal = {
+  container: document.getElementById("donor-modal"),
+  firstField: document.getElementById("editor-first-name"),
+};
+
+let isDonorModalOpen = false;
+let donorModalTrigger = null;
+
+configureDonorEditor({
+  onSuccess: async (result) => {
+    try {
+      const donorId = result?.id ? String(result.id) : null;
+      await refreshData({ donorId, preserveDraft: false, skipClients: false });
+    } finally {
+      closeDonorModal();
+    }
+  },
+});
 
 init();
 
@@ -31,6 +57,17 @@ async function init() {
   const initialDonor = params.get("donor");
   if (initialDonor) {
     await selectDonor(initialDonor);
+  }
+  const shouldOpenModal =
+    params.get("create") === "1" || params.get("new") === "1" || params.get("modal") === "donor";
+  if (shouldOpenModal) {
+    await openDonorModal();
+    params.delete("create");
+    params.delete("new");
+    params.delete("modal");
+    const query = params.toString();
+    const url = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
+    window.history.replaceState({}, "", url);
   }
   render();
 }
@@ -47,6 +84,12 @@ function bindEvents() {
     render();
   });
   elements.list?.addEventListener("click", async (event) => {
+    const createTrigger = event.target.closest("[data-open-donor-modal]");
+    if (createTrigger) {
+      event.preventDefault();
+      await openDonorModal(createTrigger);
+      return;
+    }
     const button = event.target.closest("[data-donor-id]");
     if (!button) return;
     const donorId = button.getAttribute("data-donor-id");
@@ -57,6 +100,17 @@ function bindEvents() {
     event.preventDefault();
     await exportDonors();
   });
+  elements.newDonorButton?.addEventListener("click", async (event) => {
+    await openDonorModal(event.currentTarget || event.target);
+  });
+  modal.container?.addEventListener("click", (event) => {
+    const dismiss = event.target.closest("[data-modal-dismiss]");
+    if (dismiss) {
+      event.preventDefault();
+      closeDonorModal();
+    }
+  });
+  document.addEventListener("keydown", handleDonorModalKeydown);
 }
 
 async function loadData() {
@@ -280,7 +334,7 @@ function renderDonorList() {
     emptyItem.className = "database-list__empty";
     emptyItem.innerHTML = `
       <p>No donors match your current filters.</p>
-      <a class="btn btn--ghost" href="donor-editor.html">Create a donor</a>
+      <button class="btn btn--ghost" type="button" data-open-donor-modal>Create a donor</button>
     `;
     list.append(emptyItem);
     return;
@@ -320,15 +374,18 @@ function renderDonorDetail() {
   container.querySelectorAll(".donor-profile").forEach((node) => node.remove());
   if (!state.selectedDonorId) {
     empty.classList.remove("hidden");
+    empty.removeAttribute("aria-hidden");
     return;
   }
   const summary = state.donors.find((item) => item.id === state.selectedDonorId);
   if (!summary) {
     empty.classList.remove("hidden");
+    empty.removeAttribute("aria-hidden");
     state.selectedDonorId = null;
     return;
   }
   empty.classList.add("hidden");
+  empty.setAttribute("aria-hidden", "true");
 
   const detail = state.donorDetails.get(summary.id);
   if (state.loadingDetailFor === summary.id && !detail) {
@@ -421,6 +478,48 @@ function renderDonorDetail() {
     }
     void handleInlineSubmit(detail);
   });
+}
+
+async function openDonorModal(trigger = null) {
+  if (!modal.container) return;
+  donorModalTrigger = trigger instanceof HTMLElement ? trigger : document.activeElement;
+  if (isDonorModalOpen) {
+    modal.firstField?.focus();
+    return;
+  }
+  try {
+    await refreshDonorEditorClients();
+  } catch (error) {
+    console.error("Failed to refresh clients for donor form", error);
+  }
+  resetDonorEditorForm();
+  modal.container.classList.remove("hidden");
+  modal.container.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+  isDonorModalOpen = true;
+  window.requestAnimationFrame(() => {
+    modal.firstField?.focus();
+  });
+}
+
+function closeDonorModal() {
+  if (!modal.container || !isDonorModalOpen) return;
+  modal.container.classList.add("hidden");
+  modal.container.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("modal-open");
+  isDonorModalOpen = false;
+  if (donorModalTrigger && typeof donorModalTrigger.focus === "function") {
+    donorModalTrigger.focus();
+  }
+  donorModalTrigger = null;
+}
+
+function handleDonorModalKeydown(event) {
+  if (!isDonorModalOpen) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeDonorModal();
+  }
 }
 
 function createDraftFromDonor(donor) {

@@ -16,14 +16,43 @@ const elements = {
   addHistory: document.getElementById("add-history"),
 };
 
+const callbacks = {
+  onSuccess: defaultOnSuccess,
+};
+
 init();
+
+export function configureDonorEditor(options = {}) {
+  if (options && typeof options.onSuccess === "function") {
+    callbacks.onSuccess = options.onSuccess;
+  } else if (options && options.onSuccess === null) {
+    callbacks.onSuccess = null;
+  } else if (!options || options.onSuccess === undefined) {
+    callbacks.onSuccess = defaultOnSuccess;
+  }
+}
+
+export function resetDonorEditorForm({ preserveStatus = false } = {}) {
+  resetEditorState();
+  renderAssignments();
+  renderHistory();
+  if (!preserveStatus) {
+    setStatus("");
+  }
+}
+
+export function refreshDonorEditorClients() {
+  return loadData();
+}
+
+function defaultOnSuccess() {
+  window.location.href = "donors.html";
+}
 
 function init() {
   bindEvents();
-  elements.form?.reset();
+  resetDonorEditorForm();
   loadData();
-  renderAssignments();
-  renderHistory();
 }
 
 function bindEvents() {
@@ -31,6 +60,15 @@ function bindEvents() {
   elements.addHistory?.addEventListener("click", handleAddHistory);
   elements.historyList?.addEventListener("click", handleHistoryClick);
   elements.selectAll?.addEventListener("click", handleSelectAllClients);
+}
+
+function resetEditorState() {
+  state.history = [];
+  state.assignedClients = new Set();
+  elements.form?.reset();
+  if (elements.historyYear) elements.historyYear.value = "";
+  if (elements.historyCandidate) elements.historyCandidate.value = "";
+  if (elements.historyAmount) elements.historyAmount.value = "";
 }
 
 async function loadData() {
@@ -83,13 +121,21 @@ async function handleSubmit(event) {
   };
 
   try {
-    await fetchJson("/api/donors", {
+    const result = await fetchJson("/api/donors", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
     setStatus("Donor saved", "success");
-    window.location.href = "donors.html";
+    try {
+      if (callbacks.onSuccess) {
+        await callbacks.onSuccess(result);
+      }
+    } catch (callbackError) {
+      console.error("Donor editor success handler failed", callbackError);
+    } finally {
+      resetDonorEditorForm({ preserveStatus: true });
+    }
   } catch (error) {
     console.error("Failed to create donor", error);
     setStatus("We couldn't save this donor.", "error");

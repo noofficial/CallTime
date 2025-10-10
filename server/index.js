@@ -194,6 +194,14 @@ const enhanceSchema = () => {
         ensureColumn('donors', 'first_name', 'first_name TEXT')
         ensureColumn('donors', 'last_name', 'last_name TEXT')
         ensureColumn('donors', 'notes', 'notes TEXT')
+        ensureColumn('clients', 'candidate', 'candidate TEXT')
+        ensureColumn('clients', 'office', 'office TEXT')
+        ensureColumn('clients', 'manager_name', 'manager_name TEXT')
+        ensureColumn('clients', 'contact_email', 'contact_email TEXT')
+        ensureColumn('clients', 'contact_phone', 'contact_phone TEXT')
+        ensureColumn('clients', 'launch_date', 'launch_date TEXT')
+        ensureColumn('clients', 'fundraising_goal', 'fundraising_goal REAL')
+        ensureColumn('clients', 'notes', 'notes TEXT')
         console.log('Enhanced schema applied successfully')
     } catch (error) {
         console.error('Schema enhancement error:', error.message)
@@ -533,15 +541,64 @@ app.get('/api/clients', (req, res) => {
 
 // Create client
 app.post('/api/clients', (req, res) => {
-    const { name, sheet_url } = req.body || {}
+    const payload = req.body || {}
+
+    const sanitize = (value) => {
+        if (value === null || value === undefined) return null
+        const trimmed = String(value).trim()
+        return trimmed ? trimmed : null
+    }
+
+    const name = sanitize(payload.name)
     if (!name) return res.status(400).json({ error: 'name required' })
+
+    const sheetUrl = sanitize(payload.sheet_url ?? payload.sheetUrl)
+    const candidate = sanitize(payload.candidate)
+    const office = sanitize(payload.office)
+    const managerName = sanitize(payload.managerName ?? payload.manager_name)
+    const contactEmail = sanitize(payload.contactEmail ?? payload.contact_email)
+    const contactPhone = sanitize(payload.contactPhone ?? payload.contact_phone)
+    const launchDate = sanitize(payload.launchDate ?? payload.launch_date)
+    const notes = sanitize(payload.notes)
+
+    const goalInput = payload.fundraisingGoal ?? payload.fundraising_goal
+    let fundraisingGoal = null
+    if (goalInput !== null && goalInput !== undefined && goalInput !== '') {
+        const numericGoal = Number(goalInput)
+        if (Number.isNaN(numericGoal)) {
+            return res.status(400).json({ error: 'fundraisingGoal must be numeric' })
+        }
+        fundraisingGoal = numericGoal
+    }
 
     try {
         const stmt = db.prepare(`
-            INSERT INTO clients(name, sheet_url)
-            VALUES (?, ?)
+            INSERT INTO clients(
+                name,
+                sheet_url,
+                candidate,
+                office,
+                manager_name,
+                contact_email,
+                contact_phone,
+                launch_date,
+                fundraising_goal,
+                notes
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
-        const result = stmt.run(name, sheet_url)
+        const result = stmt.run(
+            name,
+            sheetUrl,
+            candidate,
+            office,
+            managerName,
+            contactEmail,
+            contactPhone,
+            launchDate,
+            fundraisingGoal,
+            notes
+        )
         res.json({ id: result.lastInsertRowid })
     } catch (error) {
         res.status(500).json({ error: error.message })

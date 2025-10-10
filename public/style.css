@@ -801,6 +801,97 @@ textarea.input {
   display: none;
 }
 
+body.modal-open {
+  overflow: hidden;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-16);
+  pointer-events: none;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal__overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(2px);
+  pointer-events: auto;
+}
+
+.modal__panel {
+  position: relative;
+  width: min(100%, 640px);
+  max-height: 90vh;
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-card-border);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+  overflow: hidden;
+}
+
+.modal__panel--xl {
+  width: min(100%, 960px);
+}
+
+.modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-16);
+  padding: var(--space-20) var(--space-24) var(--space-12);
+  border-bottom: 1px solid var(--color-card-border-inner);
+}
+
+.modal__header-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.modal__title {
+  margin: 0;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+}
+
+.modal__body {
+  padding: var(--space-24);
+  overflow-y: auto;
+}
+
+.modal__body--scroll {
+  flex: 1;
+}
+
+.modal__close {
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xl);
+  line-height: 1;
+  cursor: pointer;
+  padding: var(--space-4);
+  border-radius: var(--radius-full);
+}
+
+.modal__close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text);
+}
+
 /* Accessibility */
 .sr-only {
   position: absolute;
@@ -941,18 +1032,22 @@ textarea.input {
 
 .client-stats {
     display: flex;
-    gap: var(--space-16);
-    margin-top: var(--space-8);
+    flex-wrap: wrap;
+    gap: var(--space-12);
+    margin-top: var(--space-12);
 }
 
 .stat-item {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: var(--space-8);
+    justify-content: center;
+    text-align: center;
+    padding: var(--space-12);
     background: var(--color-secondary);
     border-radius: var(--radius-sm);
-    min-width: 60px;
+    min-width: 120px;
+    flex: 1 1 140px;
 }
 
 .stat-value {
@@ -963,6 +1058,73 @@ textarea.input {
 .stat-label {
     font-size: var(--font-size-xs);
     color: var(--color-text-secondary);
+}
+
+.client-meta {
+    display: grid;
+    gap: var(--space-12);
+    margin: var(--space-16) 0;
+}
+
+@media (min-width: 640px) {
+    .client-meta {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+.client-meta__item {
+    padding: var(--space-12);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-base);
+    background: var(--color-bg-2);
+}
+
+.client-meta__label {
+    display: block;
+    font-size: var(--font-size-xs);
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: var(--space-4);
+}
+
+.client-meta__value {
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    color: var(--color-text);
+    word-break: break-word;
+}
+
+.client-meta__value a {
+    color: var(--color-primary);
+}
+
+.client-meta__value a:hover {
+    text-decoration: underline;
+}
+
+.client-notes {
+    margin-top: var(--space-16);
+    padding: var(--space-16);
+    border-radius: var(--radius-base);
+    background: rgba(var(--color-teal-500-rgb, 33, 128, 141), 0.08);
+    border: 1px solid rgba(var(--color-teal-500-rgb, 33, 128, 141), 0.2);
+}
+
+.client-notes__title {
+    margin: 0 0 var(--space-8);
+    font-size: var(--font-size-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-secondary);
+}
+
+.client-notes__body {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+    color: var(--color-text);
+    white-space: pre-line;
 }
 
 /* Donor Grid */
@@ -1392,6 +1554,10 @@ textarea.input {
 .client-form__grid {
   display: grid;
   gap: var(--space-16);
+}
+
+.form-row--full {
+  grid-column: 1 / -1;
 }
 
 @media (min-width: 640px) {

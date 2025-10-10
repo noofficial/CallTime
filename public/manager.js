@@ -8,7 +8,7 @@ const state = {
   assignedDonors: new Map(),
   assignedIds: new Set(),
   loadingAssignments: false,
-  isClientFormVisible: false,
+  isClientModalOpen: false,
 };
 
 const elements = {
@@ -23,14 +23,24 @@ const elements = {
   assignmentAssignedLabel: document.getElementById("assignment-assigned-label"),
   refresh: document.getElementById("refresh-overview"),
   createClient: document.getElementById("create-client"),
-  clientFormContainer: document.getElementById("client-form"),
   clientForm: document.getElementById("client-create-form"),
   clientFormName: document.getElementById("client-form-name"),
+  clientFormCandidate: document.getElementById("client-form-candidate"),
+  clientFormOffice: document.getElementById("client-form-office"),
+  clientFormManager: document.getElementById("client-form-manager"),
+  clientFormEmail: document.getElementById("client-form-email"),
+  clientFormPhone: document.getElementById("client-form-phone"),
+  clientFormLaunch: document.getElementById("client-form-launch"),
+  clientFormGoal: document.getElementById("client-form-goal"),
   clientFormSheet: document.getElementById("client-form-sheet"),
+  clientFormNotes: document.getElementById("client-form-notes"),
   clientFormCancel: document.getElementById("client-form-cancel"),
   clientFormStatus: document.getElementById("client-form-status"),
   clientFormSubmit: document.getElementById("client-form-submit"),
+  clientModal: document.getElementById("client-modal"),
 };
+
+let clientModalTrigger = null;
 
 init();
 
@@ -75,13 +85,23 @@ function bindEvents() {
     Promise.all([loadOverview(), loadDonors()]).catch((error) => reportError(error));
   });
 
-  elements.createClient?.addEventListener("click", () => {
-    toggleClientForm(!state.isClientFormVisible);
+  elements.createClient?.addEventListener("click", (event) => {
+    openClientModal(event.currentTarget || event.target);
   });
 
   elements.clientFormCancel?.addEventListener("click", () => {
-    toggleClientForm(false);
+    closeClientModal();
   });
+
+  elements.clientModal?.addEventListener("click", (event) => {
+    const dismiss = event.target.closest("[data-modal-dismiss]");
+    if (dismiss) {
+      event.preventDefault();
+      closeClientModal();
+    }
+  });
+
+  document.addEventListener("keydown", handleClientModalKeydown);
 
   elements.clientForm?.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -192,19 +212,57 @@ function renderClients() {
     const totalPledged = client.total_pledged ?? 0;
     const totalRaised = client.total_raised ?? 0;
 
+    const clientName = client.name || "Unnamed campaign";
+    const candidateName = client.candidate || "";
+    const office = client.office || "";
+    const headerSubtitleParts = [];
+    if (candidateName) {
+      headerSubtitleParts.push(candidateName);
+    }
+    if (office) {
+      headerSubtitleParts.push(office);
+    }
+    if (!headerSubtitleParts.length) {
+      headerSubtitleParts.push("Candidate pending");
+    }
+    const headerSubtitle = headerSubtitleParts.join(" • ");
+
+    const managerName = client.manager_name || client.managerName || "";
+    const contactEmail = client.contact_email || client.contactEmail || "";
+    const contactPhone = client.contact_phone || client.contactPhone || "";
+    const launchDate = client.launch_date || client.launchDate || "";
+    const fundraisingGoal = client.fundraising_goal ?? client.fundraisingGoal ?? "";
+    const sheetUrl = client.sheet_url || client.sheetUrl || "";
+    const notes = client.notes || "";
+
+    const metaHtml = [
+      renderClientMetaItem("Campaign manager", managerName),
+      renderClientMetaItem("Contact", formatContact(contactEmail, contactPhone)),
+      renderClientMetaItem("Launch date", formatLaunchDate(launchDate)),
+      renderClientMetaItem("Fundraising goal", formatFundraisingGoal(fundraisingGoal)),
+      renderClientMetaItem("Data source", formatDataSource(sheetUrl)),
+    ].join("");
+
+    const notesHtml = notes
+      ? `<div class="client-notes"><h4 class="client-notes__title">Notes</h4><p class="client-notes__body">${escapeHtml(
+          notes,
+        )}</p></div>`
+      : "";
+
     const card = document.createElement("div");
     card.className = "client-item";
     card.innerHTML = `
       <div class="client-header">
         <div>
-          <h3 class="client-name">${client.name || "Unnamed campaign"}</h3>
-          <p class="client-office">${client.candidate || "Candidate pending"}${client.office ? ` • ${client.office}` : ""}</p>
+          <h3 class="client-name">${escapeHtml(clientName)}</h3>
+          <p class="client-office">${escapeHtml(headerSubtitle)}</p>
         </div>
         <div class="client-actions">
           <button class="btn btn--sm btn--outline" data-action="manage" data-client-id="${client.id}">Manage queue</button>
           <button class="btn btn--sm btn--danger" data-action="delete" data-client-id="${client.id}">Delete</button>
         </div>
       </div>
+      <div class="client-meta">${metaHtml}</div>
       <div class="client-stats">
         <div class="stat-item">
           <div class="stat-value">${assigned}</div>
@@ -223,6 +281,7 @@ function renderClients() {
           <div class="stat-label">Raised</div>
         </div>
       </div>
+      ${notesHtml}
     `;
 
     card
@@ -514,10 +573,25 @@ async function handleCreateClientSubmit() {
   }
 
   const name = elements.clientFormName?.value.trim() || "";
+  const candidate = elements.clientFormCandidate?.value.trim() || "";
+  const office = elements.clientFormOffice?.value.trim() || "";
+  const managerName = elements.clientFormManager?.value.trim() || "";
+  const contactEmail = elements.clientFormEmail?.value.trim() || "";
+  const contactPhone = elements.clientFormPhone?.value.trim() || "";
+  const launchDate = elements.clientFormLaunch?.value.trim() || "";
+  const goalInput = elements.clientFormGoal?.value.trim() || "";
   const sheetUrl = elements.clientFormSheet?.value.trim() || "";
+  const notes = elements.clientFormNotes?.value.trim() || "";
   if (!name) {
     setClientFormStatus("Campaign name is required.", "error");
     elements.clientFormName?.focus();
+    return;
+  }
+
+  const fundraisingGoal = parseFundraisingGoal(goalInput);
+  if (goalInput && fundraisingGoal === null) {
+    setClientFormStatus("Enter a valid fundraising goal amount.", "error");
+    elements.clientFormGoal?.focus();
     return;
   }
 
@@ -528,7 +602,18 @@ async function handleCreateClientSubmit() {
     const response = await fetch("/api/clients", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, sheet_url: sheetUrl }),
+      body: JSON.stringify({
+        name,
+        candidate,
+        office,
+        managerName,
+        contactEmail,
+        contactPhone,
+        launchDate,
+        fundraisingGoal,
+        sheetUrl,
+        notes,
+      }),
     });
     if (!response.ok) throw new Error("Unable to create client");
     await loadOverview();
@@ -547,26 +632,48 @@ function reportError(error) {
   window.alert(error.message || "An unexpected error occurred.");
 }
 
-function toggleClientForm(shouldShow) {
-  if (!elements.clientFormContainer || !elements.createClient) return;
-  if (shouldShow) {
-    elements.clientFormContainer.classList.remove("hidden");
-    elements.clientFormContainer.setAttribute("aria-hidden", "false");
-    elements.createClient.setAttribute("aria-expanded", "true");
-    elements.clientForm?.reset();
-    setClientFormBusy(false);
-    setClientFormStatus("");
-    state.isClientFormVisible = true;
-    window.requestAnimationFrame(() => {
-      elements.clientFormName?.focus();
-    });
-  } else {
-    elements.clientFormContainer.classList.add("hidden");
-    elements.clientFormContainer.setAttribute("aria-hidden", "true");
-    elements.createClient.setAttribute("aria-expanded", "false");
-    elements.clientForm?.reset();
-    setClientFormStatus("");
-    state.isClientFormVisible = false;
+function openClientModal(trigger = null) {
+  if (!elements.clientModal) return;
+  clientModalTrigger = trigger instanceof HTMLElement ? trigger : document.activeElement;
+  if (state.isClientModalOpen) {
+    elements.clientFormName?.focus();
+    return;
+  }
+  resetClientForm();
+  setClientFormBusy(false);
+  elements.clientModal.classList.remove("hidden");
+  elements.clientModal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+  state.isClientModalOpen = true;
+  window.requestAnimationFrame(() => {
+    elements.clientFormName?.focus();
+  });
+}
+
+function closeClientModal() {
+  if (!elements.clientModal || !state.isClientModalOpen) return;
+  elements.clientModal.classList.add("hidden");
+  elements.clientModal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("modal-open");
+  state.isClientModalOpen = false;
+  resetClientForm();
+  setClientFormBusy(false);
+  if (clientModalTrigger && typeof clientModalTrigger.focus === "function") {
+    clientModalTrigger.focus();
+  }
+  clientModalTrigger = null;
+}
+
+function resetClientForm() {
+  elements.clientForm?.reset();
+  setClientFormStatus("");
+}
+
+function handleClientModalKeydown(event) {
+  if (!state.isClientModalOpen) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeClientModal();
   }
 }
 
@@ -590,5 +697,112 @@ function setClientFormStatus(message = "", tone = "info") {
   status.className = "client-form__status";
   if (message && tone !== "info") {
     status.classList.add(`client-form__status--${tone}`);
+  }
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function parseFundraisingGoal(value) {
+  if (value === null || value === undefined) return null;
+  const normalized = String(value).replace(/[^0-9.]/g, "").trim();
+  if (!normalized) return null;
+  const numeric = Number(normalized);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function renderClientMetaItem(label, entry, options = {}) {
+  const normalized =
+    typeof entry === "object" && entry !== null && "value" in entry
+      ? { value: entry.value, isHtml: Boolean(entry.isHtml) }
+      : { value: entry, isHtml: Boolean(options.allowHtml) };
+  const hasValue =
+    normalized.value !== null &&
+    normalized.value !== undefined &&
+    !(typeof normalized.value === "string" && normalized.value.trim() === "");
+  const display = hasValue
+    ? normalized.isHtml
+      ? normalized.value
+      : escapeHtml(String(normalized.value))
+    : '<span class="muted">Not set</span>';
+  return `
+    <div class="client-meta__item">
+      <span class="client-meta__label">${escapeHtml(label)}</span>
+      <span class="client-meta__value">${display}</span>
+    </div>
+  `;
+}
+
+function formatContact(email, phone) {
+  const parts = [];
+  if (email) {
+    const trimmedEmail = email.trim();
+    if (trimmedEmail) {
+      parts.push(`<a href="mailto:${encodeURIComponent(trimmedEmail)}">${escapeHtml(trimmedEmail)}</a>`);
+    }
+  }
+  if (phone) {
+    const trimmedPhone = phone.trim();
+    if (trimmedPhone) {
+      const telHref = trimmedPhone.replace(/[^0-9+]/g, "");
+      if (telHref) {
+        parts.push(`<a href="tel:${telHref}">${escapeHtml(trimmedPhone)}</a>`);
+      } else {
+        parts.push(escapeHtml(trimmedPhone));
+      }
+    }
+  }
+  if (!parts.length) {
+    return { value: "", isHtml: true };
+  }
+  return { value: parts.join("<br />"), isHtml: true };
+}
+
+function formatLaunchDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  }).format(date);
+}
+
+function formatFundraisingGoal(value) {
+  if (value === null || value === undefined || value === "") {
+    return "";
+  }
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) {
+    return "";
+  }
+  return `$${numeric.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+}
+
+function formatDataSource(url) {
+  if (!url) {
+    return { value: "", isHtml: true };
+  }
+  try {
+    const parsed = new URL(url, window.location.origin);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return { value: parsed.href, isHtml: false };
+    }
+    const label = parsed.hostname.replace(/^www\./, "");
+    return {
+      value: `<a href="${escapeHtml(parsed.href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`,
+      isHtml: true,
+    };
+  } catch (error) {
+    return { value: url, isHtml: false };
   }
 }

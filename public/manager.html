@@ -45,47 +45,13 @@
             class="btn btn--sm btn--primary"
             id="create-client"
             type="button"
-            aria-expanded="false"
-            aria-controls="client-create-form"
+            aria-haspopup="dialog"
+            aria-controls="client-modal"
           >
             New client
           </button>
         </div>
         <div class="card__body">
-          <div id="client-form" class="client-form hidden" aria-hidden="true">
-            <form id="client-create-form" class="client-form__form" novalidate>
-              <div class="client-form__grid">
-                <div class="form-row">
-                  <label class="form-label" for="client-form-name">Campaign name</label>
-                  <input
-                    class="form-control"
-                    id="client-form-name"
-                    name="name"
-                    placeholder="Candidate for City Council"
-                    required
-                  />
-                </div>
-                <div class="form-row">
-                  <label class="form-label" for="client-form-sheet">Data source URL</label>
-                  <input
-                    class="form-control"
-                    id="client-form-sheet"
-                    name="sheetUrl"
-                    type="url"
-                    placeholder="https://docs.google.com/..."
-                  />
-                  <p class="client-form__help">Optional link to Google Sheet or CSV export.</p>
-                </div>
-              </div>
-              <div class="client-form__actions">
-                <span class="client-form__status" id="client-form-status" role="status" aria-live="polite"></span>
-                <div class="client-form__buttons">
-                  <button class="btn btn--ghost" type="button" id="client-form-cancel">Cancel</button>
-                  <button class="btn btn--primary" type="submit" id="client-form-submit">Create client</button>
-                </div>
-              </div>
-            </form>
-          </div>
           <div id="manager-clients" class="clients-grid"></div>
         </div>
       </article>
@@ -143,6 +109,106 @@
       <div class="donor-row__assignments"></div>
     </div>
   </template>
+
+  <div
+    class="modal hidden"
+    id="client-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-hidden="true"
+    aria-labelledby="client-modal-title"
+  >
+    <div class="modal__overlay" data-modal-dismiss></div>
+    <div class="modal__panel" role="document">
+      <header class="modal__header">
+        <div class="modal__header-text">
+          <p class="eyebrow">Campaign setup</p>
+          <h2 class="modal__title" id="client-modal-title">New campaign client</h2>
+          <p class="muted">Capture the key details so fundraisers have the context they need.</p>
+        </div>
+        <button class="modal__close" type="button" aria-label="Close" data-modal-dismiss>&times;</button>
+      </header>
+      <div class="modal__body modal__body--scroll">
+        <form id="client-create-form" class="client-form__form" novalidate>
+          <div class="client-form__grid">
+            <div class="form-row">
+              <label class="form-label" for="client-form-name">Campaign name</label>
+              <input
+                class="form-control"
+                id="client-form-name"
+                name="name"
+                placeholder="Candidate for City Council"
+                required
+              />
+            </div>
+            <div class="form-row">
+              <label class="form-label" for="client-form-candidate">Candidate name</label>
+              <input
+                class="form-control"
+                id="client-form-candidate"
+                name="candidate"
+                placeholder="Alex Morgan"
+              />
+            </div>
+            <div class="form-row">
+              <label class="form-label" for="client-form-office">Office sought</label>
+              <input class="form-control" id="client-form-office" name="office" placeholder="Mayor of Springfield" />
+            </div>
+            <div class="form-row">
+              <label class="form-label" for="client-form-manager">Campaign manager</label>
+              <input class="form-control" id="client-form-manager" name="manager" placeholder="Jordan Smith" />
+            </div>
+            <div class="form-row">
+              <label class="form-label" for="client-form-email">Contact email</label>
+              <input class="form-control" id="client-form-email" name="email" type="email" placeholder="team@campaign.com" />
+            </div>
+            <div class="form-row">
+              <label class="form-label" for="client-form-phone">Contact phone</label>
+              <input class="form-control" id="client-form-phone" name="phone" type="tel" placeholder="(555) 123-4567" />
+            </div>
+            <div class="form-row">
+              <label class="form-label" for="client-form-launch">Launch date</label>
+              <input class="form-control" id="client-form-launch" name="launchDate" type="date" />
+            </div>
+            <div class="form-row">
+              <label class="form-label" for="client-form-goal">Fundraising goal</label>
+              <input
+                class="form-control"
+                id="client-form-goal"
+                name="goal"
+                type="number"
+                min="0"
+                step="1000"
+                placeholder="500000"
+              />
+            </div>
+            <div class="form-row form-row--full">
+              <label class="form-label" for="client-form-sheet">Data source URL</label>
+              <input
+                class="form-control"
+                id="client-form-sheet"
+                name="sheetUrl"
+                type="url"
+                placeholder="https://docs.google.com/..."
+              />
+              <p class="client-form__help">Optional link to Google Sheet or CSV export.</p>
+            </div>
+            <div class="form-row form-row--full">
+              <label class="form-label" for="client-form-notes">Important notes</label>
+              <textarea class="form-control textarea" id="client-form-notes" name="notes" rows="3"></textarea>
+            </div>
+          </div>
+          <div class="client-form__actions">
+            <span class="client-form__status" id="client-form-status" role="status" aria-live="polite"></span>
+            <div class="client-form__buttons">
+              <button class="btn btn--ghost" type="button" id="client-form-cancel" data-modal-dismiss>Cancel</button>
+              <button class="btn btn--primary" type="submit" id="client-form-submit">Create client</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="manager.js"></script>
 </body>
