@@ -1,7 +1,3 @@
-import { CallTimeDatabase, DATABASE_KEY } from "./database.js";
-
-const db = new CallTimeDatabase();
-
 const state = {
   history: [],
   assignedClients: new Set(),
@@ -35,19 +31,35 @@ function bindEvents() {
   elements.addHistory?.addEventListener("click", handleAddHistory);
   elements.historyList?.addEventListener("click", handleHistoryClick);
   elements.selectAll?.addEventListener("click", handleSelectAllClients);
-  window.addEventListener("storage", handleStorageSync);
 }
 
-function loadData() {
-  const previousSelection = new Set(state.assignedClients);
-  state.clients = db.getClients();
-  const validClientIds = new Set(state.clients.map((client) => client.id));
-  state.assignedClients = new Set([...previousSelection].filter((id) => validClientIds.has(id)));
+async function loadData() {
+  try {
+    const overview = await fetchJson("/api/manager/overview");
+    const clients = Array.isArray(overview?.clients)
+      ? overview.clients.map((client) => ({
+          id: client.id != null ? String(client.id) : "",
+          label: client.name || client.candidate || client.label || "Unnamed candidate",
+        }))
+      : [];
+    const previousSelection = new Set(state.assignedClients);
+    state.clients = clients;
+    const validClientIds = new Set(clients.map((client) => client.id));
+    state.assignedClients = new Set([...previousSelection].filter((id) => validClientIds.has(id)));
+    renderAssignments();
+  } catch (error) {
+    console.error("Failed to load clients", error);
+  }
 }
 
-function handleSubmit(event) {
+async function handleSubmit(event) {
   event.preventDefault();
-  if (!elements.form.reportValidity()) {
+  if (!elements.form || !elements.form.reportValidity()) {
+    return;
+  }
+  const selectedClients = Array.from(state.assignedClients);
+  if (!selectedClients.length) {
+    setStatus("Select at least one campaign to assign this donor.", "error");
     return;
   }
   const formData = new FormData(elements.form);
@@ -63,20 +75,24 @@ function handleSubmit(event) {
     ask: parseNumber(formData.get("ask")),
     lastGift: formData.get("lastGift")?.toString().trim() || "",
     pictureUrl: formData.get("pictureUrl")?.toString().trim() || "",
-    donorNotes: formData.get("notes")?.toString().trim() || "",
+    notes: formData.get("notes")?.toString().trim() || "",
     biography: formData.get("biography")?.toString().trim() || "",
     history: [...state.history],
+    assignedClientIds: selectedClients,
+    createdBy: "donor-editor",
   };
+
   try {
-    db.createDonor(payload, Array.from(state.assignedClients));
-    elements.status.textContent = "Donor saved";
+    await fetchJson("/api/donors", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    setStatus("Donor saved", "success");
     window.location.href = "donors.html";
   } catch (error) {
     console.error("Failed to create donor", error);
-    elements.status.textContent = "We couldn't save this donor.";
-    setTimeout(() => {
-      elements.status.textContent = "";
-    }, 3000);
+    setStatus("We couldn't save this donor.", "error");
   }
 }
 
@@ -152,7 +168,7 @@ function renderAssignments() {
       }
     });
     const name = document.createElement("span");
-    name.textContent = client.label || client.candidate || "Unnamed candidate";
+    name.textContent = client.label || "Unnamed candidate";
     label.append(input, name);
     container.append(label);
   });
@@ -217,13 +233,11 @@ function sortHistory() {
   });
 }
 
-function handleStorageSync(event) {
-  if (event.key && event.key !== DATABASE_KEY) {
-    return;
+function formatCurrency(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "";
   }
-  loadData();
-  renderAssignments();
-  renderHistory();
+  return Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
 
 function parseNumber(value) {
@@ -248,9 +262,19 @@ function createId(value = "") {
   return `id-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function formatCurrency(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) {
-    return "";
+function setStatus(message, type) {
+  if (!elements.status) return;
+  elements.status.textContent = message;
+  elements.status.dataset.state = type || "";
+  if (!message) {
+    delete elements.status.dataset.state;
   }
-  return Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 });
+}
+
+async function fetchJson(url, options) {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+  return response.status === 204 ? null : response.json();
 }
