@@ -797,10 +797,6 @@ textarea.input {
 .block {
   display: block;
 }
-.hidden {
-  display: none;
-}
-
 .auth-screen {
   position: fixed;
   inset: 0;
@@ -810,6 +806,14 @@ textarea.input {
   justify-content: center;
   padding: 2rem;
   z-index: 1200;
+}
+
+.hidden {
+  display: none;
+}
+
+.auth-screen.hidden {
+  display: none;
 }
 
 .auth-panel {
