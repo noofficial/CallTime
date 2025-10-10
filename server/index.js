@@ -539,36 +539,43 @@ app.get('/api/clients', (req, res) => {
     }
 })
 
+const sanitizeClientField = (value) => {
+    if (value === null || value === undefined) return null
+    const trimmed = String(value).trim()
+    return trimmed ? trimmed : null
+}
+
+const resolveFundraisingGoal = (input) => {
+    if (input === null || input === undefined || input === '') {
+        return { value: null, error: null }
+    }
+    const numericGoal = Number(input)
+    if (Number.isNaN(numericGoal)) {
+        return { value: null, error: 'fundraisingGoal must be numeric' }
+    }
+    return { value: numericGoal, error: null }
+}
+
 // Create client
 app.post('/api/clients', (req, res) => {
     const payload = req.body || {}
 
-    const sanitize = (value) => {
-        if (value === null || value === undefined) return null
-        const trimmed = String(value).trim()
-        return trimmed ? trimmed : null
-    }
-
-    const name = sanitize(payload.name)
+    const name = sanitizeClientField(payload.name)
     if (!name) return res.status(400).json({ error: 'name required' })
 
-    const sheetUrl = sanitize(payload.sheet_url ?? payload.sheetUrl)
-    const candidate = sanitize(payload.candidate)
-    const office = sanitize(payload.office)
-    const managerName = sanitize(payload.managerName ?? payload.manager_name)
-    const contactEmail = sanitize(payload.contactEmail ?? payload.contact_email)
-    const contactPhone = sanitize(payload.contactPhone ?? payload.contact_phone)
-    const launchDate = sanitize(payload.launchDate ?? payload.launch_date)
-    const notes = sanitize(payload.notes)
+    const sheetUrl = sanitizeClientField(payload.sheet_url ?? payload.sheetUrl)
+    const candidate = sanitizeClientField(payload.candidate)
+    const office = sanitizeClientField(payload.office)
+    const managerName = sanitizeClientField(payload.managerName ?? payload.manager_name)
+    const contactEmail = sanitizeClientField(payload.contactEmail ?? payload.contact_email)
+    const contactPhone = sanitizeClientField(payload.contactPhone ?? payload.contact_phone)
+    const launchDate = sanitizeClientField(payload.launchDate ?? payload.launch_date)
+    const notes = sanitizeClientField(payload.notes)
 
     const goalInput = payload.fundraisingGoal ?? payload.fundraising_goal
-    let fundraisingGoal = null
-    if (goalInput !== null && goalInput !== undefined && goalInput !== '') {
-        const numericGoal = Number(goalInput)
-        if (Number.isNaN(numericGoal)) {
-            return res.status(400).json({ error: 'fundraisingGoal must be numeric' })
-        }
-        fundraisingGoal = numericGoal
+    const { value: fundraisingGoal, error: goalError } = resolveFundraisingGoal(goalInput)
+    if (goalError) {
+        return res.status(400).json({ error: goalError })
     }
 
     try {
@@ -600,6 +607,72 @@ app.post('/api/clients', (req, res) => {
             notes
         )
         res.json({ id: result.lastInsertRowid })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+})
+
+// Update client
+app.put('/api/clients/:clientId', (req, res) => {
+    const clientId = req.params.clientId
+    const payload = req.body || {}
+
+    const existing = db.prepare('SELECT id FROM clients WHERE id = ?').get(clientId)
+    if (!existing) {
+        return res.status(404).json({ error: 'Client not found' })
+    }
+
+    const name = sanitizeClientField(payload.name)
+    if (!name) {
+        return res.status(400).json({ error: 'name required' })
+    }
+
+    const sheetUrl = sanitizeClientField(payload.sheet_url ?? payload.sheetUrl)
+    const candidate = sanitizeClientField(payload.candidate)
+    const office = sanitizeClientField(payload.office)
+    const managerName = sanitizeClientField(payload.managerName ?? payload.manager_name)
+    const contactEmail = sanitizeClientField(payload.contactEmail ?? payload.contact_email)
+    const contactPhone = sanitizeClientField(payload.contactPhone ?? payload.contact_phone)
+    const launchDate = sanitizeClientField(payload.launchDate ?? payload.launch_date)
+    const notes = sanitizeClientField(payload.notes)
+
+    const goalInput = payload.fundraisingGoal ?? payload.fundraising_goal
+    const { value: fundraisingGoal, error: goalError } = resolveFundraisingGoal(goalInput)
+    if (goalError) {
+        return res.status(400).json({ error: goalError })
+    }
+
+    try {
+        const stmt = db.prepare(`
+            UPDATE clients
+            SET name = ?,
+                sheet_url = ?,
+                candidate = ?,
+                office = ?,
+                manager_name = ?,
+                contact_email = ?,
+                contact_phone = ?,
+                launch_date = ?,
+                fundraising_goal = ?,
+                notes = ?
+            WHERE id = ?
+        `)
+
+        stmt.run(
+            name,
+            sheetUrl,
+            candidate,
+            office,
+            managerName,
+            contactEmail,
+            contactPhone,
+            launchDate,
+            fundraisingGoal,
+            notes,
+            clientId
+        )
+
+        res.json({ success: true })
     } catch (error) {
         res.status(500).json({ error: error.message })
     }

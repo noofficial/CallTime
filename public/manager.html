@@ -24,35 +24,37 @@
 
   <main class="container">
     <section class="dashboard-grid manager-grid">
-      <article class="card span-2">
-        <div class="card__header">
-          <div>
-            <h2>Workspace health</h2>
-            <p class="muted">Snapshot of donors and active campaigns.</p>
-          </div>
-          <button class="btn btn--sm btn--outline" id="refresh-overview">Refresh</button>
-        </div>
-        <div class="card__body" id="manager-stats"></div>
-      </article>
-
-      <article class="card">
+      <article class="card span-2 card--clients">
         <div class="card__header">
           <div>
             <h2>Campaign clients</h2>
             <p class="muted">Track progress across every active call program.</p>
           </div>
-          <button
-            class="btn btn--sm btn--primary"
-            id="create-client"
-            type="button"
-            aria-haspopup="dialog"
-            aria-controls="client-modal"
-          >
-            New client
-          </button>
+          <div class="client-card-toolbar">
+            <div class="client-card-select">
+              <label class="sr-only" for="client-selector">Select campaign client</label>
+              <select class="form-control" id="client-selector">
+                <option value="">Select a client</option>
+              </select>
+            </div>
+            <div class="client-card-buttons">
+              <button class="btn btn--sm btn--outline" type="button" id="edit-client" disabled>
+                Edit client
+              </button>
+              <button
+                class="btn btn--sm btn--primary"
+                id="create-client"
+                type="button"
+                aria-haspopup="dialog"
+                aria-controls="client-modal"
+              >
+                New client
+              </button>
+            </div>
+          </div>
         </div>
         <div class="card__body">
-          <div id="manager-clients" class="clients-grid"></div>
+          <div id="manager-clients" class="clients-grid client-detail-grid"></div>
         </div>
       </article>
 
@@ -124,7 +126,7 @@
         <div class="modal__header-text">
           <p class="eyebrow">Campaign setup</p>
           <h2 class="modal__title" id="client-modal-title">New campaign client</h2>
-          <p class="muted">Capture the key details so fundraisers have the context they need.</p>
+          <p class="muted" id="client-modal-description">Capture the key details so fundraisers have the context they need.</p>
         </div>
         <button class="modal__close" type="button" aria-label="Close" data-modal-dismiss>&times;</button>
       </header>

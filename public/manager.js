@@ -2,18 +2,22 @@ const state = {
   clients: [],
   donors: [],
   filteredDonors: [],
-  statistics: null,
   selectedClientId: "",
   selectedClientName: "",
   assignedDonors: new Map(),
   assignedIds: new Set(),
   loadingAssignments: false,
   isClientModalOpen: false,
+  currentClientId: "",
+  clientSelectionTouched: false,
+  clientFormMode: "create",
+  editingClientId: null,
 };
 
 const elements = {
-  stats: document.getElementById("manager-stats"),
   clients: document.getElementById("manager-clients"),
+  clientSelector: document.getElementById("client-selector"),
+  editClient: document.getElementById("edit-client"),
   donors: document.getElementById("manager-donors"),
   donorSearch: document.getElementById("manager-donor-search"),
   assignmentClient: document.getElementById("assignment-client"),
@@ -21,7 +25,6 @@ const elements = {
   assignmentAssigned: document.getElementById("assignment-assigned"),
   assignmentAvailableLabel: document.getElementById("assignment-available-label"),
   assignmentAssignedLabel: document.getElementById("assignment-assigned-label"),
-  refresh: document.getElementById("refresh-overview"),
   createClient: document.getElementById("create-client"),
   clientForm: document.getElementById("client-create-form"),
   clientFormName: document.getElementById("client-form-name"),
@@ -38,6 +41,8 @@ const elements = {
   clientFormStatus: document.getElementById("client-form-status"),
   clientFormSubmit: document.getElementById("client-form-submit"),
   clientModal: document.getElementById("client-modal"),
+  clientModalTitle: document.getElementById("client-modal-title"),
+  clientModalDescription: document.getElementById("client-modal-description"),
 };
 
 let clientModalTrigger = null;
@@ -53,6 +58,18 @@ function bindEvents() {
   elements.donorSearch?.addEventListener("input", () => {
     applyDonorFilter();
     renderDonors();
+  });
+
+  elements.clientSelector?.addEventListener("change", (event) => {
+    state.clientSelectionTouched = true;
+    state.currentClientId = event.target.value;
+    renderClients();
+  });
+
+  elements.editClient?.addEventListener("click", () => {
+    const client = getCurrentClient();
+    if (!client) return;
+    openEditClientModal(client, elements.editClient);
   });
 
   elements.assignmentClient?.addEventListener("change", async () => {
@@ -81,12 +98,8 @@ function bindEvents() {
     unassignDonor(state.selectedClientId, donorId);
   });
 
-  elements.refresh?.addEventListener("click", () => {
-    Promise.all([loadOverview(), loadDonors()]).catch((error) => reportError(error));
-  });
-
   elements.createClient?.addEventListener("click", (event) => {
-    openClientModal(event.currentTarget || event.target);
+    openCreateClientModal(event.currentTarget || event.target);
   });
 
   elements.clientFormCancel?.addEventListener("click", () => {
@@ -105,7 +118,7 @@ function bindEvents() {
 
   elements.clientForm?.addEventListener("submit", (event) => {
     event.preventDefault();
-    handleCreateClientSubmit();
+    handleClientFormSubmit();
   });
 }
 
@@ -115,8 +128,7 @@ async function loadOverview() {
     if (!response.ok) throw new Error("Unable to load manager overview");
     const data = await response.json();
     state.clients = Array.isArray(data.clients) ? data.clients : [];
-    state.statistics = data.statistics || null;
-    renderStats();
+    ensureCurrentClientSelection();
     renderClients();
     populateAssignmentSelect();
   } catch (error) {
@@ -157,101 +169,130 @@ async function loadAssignmentsForClient(clientId) {
   }
 }
 
-function renderStats() {
-  const container = elements.stats;
-  if (!container) return;
-  container.innerHTML = "";
-  if (!state.statistics) {
-    container.innerHTML = `<p class="muted">Statistics unavailable. Try refreshing.</p>`;
+function ensureCurrentClientSelection() {
+  if (!state.clients.length) {
+    state.currentClientId = "";
+    state.clientSelectionTouched = false;
     return;
   }
 
-  const stats = [
-    {
-      label: "Total donors",
-      value: state.statistics.totalDonors ?? 0,
-    },
-    {
-      label: "Unassigned donors",
-      value: state.statistics.unassignedDonors ?? 0,
-    },
-    {
-      label: "Active clients",
-      value: state.statistics.activeClients ?? 0,
-    },
-  ];
+  if (!state.clientSelectionTouched && !state.currentClientId) {
+    state.currentClientId = String(state.clients[0].id);
+    return;
+  }
 
-  const statGrid = document.createElement("div");
-  statGrid.className = "stat-grid";
+  if (state.currentClientId) {
+    const exists = state.clients.some((client) => String(client.id) === String(state.currentClientId));
+    if (!exists) {
+      state.clientSelectionTouched = false;
+      state.currentClientId = String(state.clients[0].id);
+    }
+  }
+}
 
-  stats.forEach((stat) => {
-    const card = document.createElement("div");
-    card.className = "stat-card";
-    card.innerHTML = `
-      <div class="stat-value">${Number(stat.value).toLocaleString()}</div>
-      <div class="stat-label">${stat.label}</div>
-    `;
-    statGrid.append(card);
-  });
+function getCurrentClient() {
+  if (!state.currentClientId) return null;
+  return state.clients.find((client) => String(client.id) === String(state.currentClientId)) || null;
+}
 
-  container.append(statGrid);
+function updateEditClientButton() {
+  if (!elements.editClient) return;
+  elements.editClient.disabled = !Boolean(getCurrentClient());
 }
 
 function renderClients() {
   const container = elements.clients;
   if (!container) return;
+  if (elements.clientSelector) {
+    const select = elements.clientSelector;
+    const previousValue = select.value;
+    select.innerHTML = "";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Select a client";
+    select.append(placeholder);
+
+    state.clients.forEach((client) => {
+      const option = document.createElement("option");
+      option.value = client.id;
+      option.textContent = client.name || client.candidate || "Unnamed campaign";
+      select.append(option);
+    });
+
+    if (state.currentClientId && state.clients.some((client) => String(client.id) === String(state.currentClientId))) {
+      select.value = state.currentClientId;
+    } else if (!state.clientSelectionTouched && state.clients.length) {
+      state.currentClientId = String(state.clients[0].id);
+      select.value = state.currentClientId;
+    } else if (!state.currentClientId) {
+      select.value = "";
+    } else if (previousValue && previousValue !== select.value) {
+      select.value = previousValue;
+    }
+  }
+
+  updateEditClientButton();
+
   container.innerHTML = "";
   if (!state.clients.length) {
     container.innerHTML = `<p class="muted">No clients found. Create a client to get started.</p>`;
     return;
   }
 
-  state.clients.forEach((client) => {
-    const assigned = client.assigned_donors ?? 0;
-    const totalCalls = client.total_calls ?? 0;
-    const totalPledged = client.total_pledged ?? 0;
-    const totalRaised = client.total_raised ?? 0;
+  if (!state.currentClientId) {
+    container.innerHTML = `<p class="muted">Select a client to see campaign details.</p>`;
+    return;
+  }
 
-    const clientName = client.name || "Unnamed campaign";
-    const candidateName = client.candidate || "";
-    const office = client.office || "";
-    const headerSubtitleParts = [];
-    if (candidateName) {
-      headerSubtitleParts.push(candidateName);
-    }
-    if (office) {
-      headerSubtitleParts.push(office);
-    }
-    if (!headerSubtitleParts.length) {
-      headerSubtitleParts.push("Candidate pending");
-    }
-    const headerSubtitle = headerSubtitleParts.join(" • ");
+  const client = getCurrentClient();
+  if (!client) {
+    container.innerHTML = `<p class="muted">Select a client to see campaign details.</p>`;
+    return;
+  }
 
-    const managerName = client.manager_name || client.managerName || "";
-    const contactEmail = client.contact_email || client.contactEmail || "";
-    const contactPhone = client.contact_phone || client.contactPhone || "";
-    const launchDate = client.launch_date || client.launchDate || "";
-    const fundraisingGoal = client.fundraising_goal ?? client.fundraisingGoal ?? "";
-    const sheetUrl = client.sheet_url || client.sheetUrl || "";
-    const notes = client.notes || "";
+  const assigned = client.assigned_donors ?? 0;
+  const totalCalls = client.total_calls ?? 0;
+  const totalPledged = client.total_pledged ?? 0;
+  const totalRaised = client.total_raised ?? 0;
 
-    const metaHtml = [
-      renderClientMetaItem("Campaign manager", managerName),
-      renderClientMetaItem("Contact", formatContact(contactEmail, contactPhone)),
-      renderClientMetaItem("Launch date", formatLaunchDate(launchDate)),
-      renderClientMetaItem("Fundraising goal", formatFundraisingGoal(fundraisingGoal)),
-      renderClientMetaItem("Data source", formatDataSource(sheetUrl)),
-    ].join("");
+  const clientName = client.name || "Unnamed campaign";
+  const candidateName = client.candidate || "";
+  const office = client.office || "";
+  const headerSubtitleParts = [];
+  if (candidateName) {
+    headerSubtitleParts.push(candidateName);
+  }
+  if (office) {
+    headerSubtitleParts.push(office);
+  }
+  if (!headerSubtitleParts.length) {
+    headerSubtitleParts.push("Candidate pending");
+  }
+  const headerSubtitle = headerSubtitleParts.join(" • ");
 
-    const notesHtml = notes
-      ? `<div class="client-notes"><h4 class="client-notes__title">Notes</h4><p class="client-notes__body">${escapeHtml(
-          notes,
-        )}</p></div>`
-      : "";
+  const managerName = client.manager_name || client.managerName || "";
+  const contactEmail = client.contact_email || client.contactEmail || "";
+  const contactPhone = client.contact_phone || client.contactPhone || "";
+  const launchDate = client.launch_date || client.launchDate || "";
+  const fundraisingGoal = client.fundraising_goal ?? client.fundraisingGoal ?? "";
+  const sheetUrl = client.sheet_url || client.sheetUrl || "";
+  const notes = client.notes || "";
 
-    const card = document.createElement("div");
-    card.className = "client-item";
-    card.innerHTML = `
+  const metaHtml = [
+    renderClientMetaItem("Campaign manager", managerName),
+    renderClientMetaItem("Contact", formatContact(contactEmail, contactPhone)),
+    renderClientMetaItem("Launch date", formatLaunchDate(launchDate)),
+    renderClientMetaItem("Fundraising goal", formatFundraisingGoal(fundraisingGoal)),
+    renderClientMetaItem("Data source", formatDataSource(sheetUrl)),
+  ].join("");
+
+  const notesHtml = notes
+    ? `<div class="client-notes"><h4 class="client-notes__title">Notes</h4><p class="client-notes__body">${escapeHtml(notes)}</p></div>`
+    : "";
+
+  const card = document.createElement("div");
+  card.className = "client-item client-item--detail";
+  card.innerHTML = `
       <div class="client-header">
         <div>
           <h3 class="client-name">${escapeHtml(clientName)}</h3>
@@ -284,23 +325,22 @@ function renderClients() {
       ${notesHtml}
     `;
 
-    card
-      .querySelector('[data-action="manage"]')
-      ?.addEventListener("click", () => {
-        if (!elements.assignmentClient) return;
-        elements.assignmentClient.value = client.id;
-        elements.assignmentClient.dispatchEvent(new Event("change"));
-        window.scrollTo({ top: elements.assignmentClient.offsetTop - 80, behavior: "smooth" });
-      });
+  card
+    .querySelector('[data-action="manage"]')
+    ?.addEventListener("click", () => {
+      if (!elements.assignmentClient) return;
+      elements.assignmentClient.value = client.id;
+      elements.assignmentClient.dispatchEvent(new Event("change"));
+      window.scrollTo({ top: elements.assignmentClient.offsetTop - 80, behavior: "smooth" });
+    });
 
-    card
-      .querySelector('[data-action="delete"]')
-      ?.addEventListener("click", () => {
-        handleDeleteClient(client.id);
-      });
+  card
+    .querySelector('[data-action="delete"]')
+    ?.addEventListener("click", () => {
+      handleDeleteClient(client.id);
+    });
 
-    container.append(card);
-  });
+  container.append(card);
 }
 
 function applyDonorFilter() {
@@ -495,6 +535,11 @@ async function handleDeleteClient(clientId) {
       }
     }
 
+    if (String(state.currentClientId) === String(clientId)) {
+      state.currentClientId = "";
+      state.clientSelectionTouched = false;
+    }
+
     await loadOverview();
     await loadDonors();
   } catch (error) {
@@ -565,7 +610,7 @@ async function unassignDonor(clientId, donorId) {
   }
 }
 
-async function handleCreateClientSubmit() {
+async function handleClientFormSubmit() {
   const form = elements.clientForm;
   if (!form) return;
   if (!form.reportValidity()) {
@@ -599,8 +644,17 @@ async function handleCreateClientSubmit() {
   setClientFormStatus("Saving…");
 
   try {
-    const response = await fetch("/api/clients", {
-      method: "POST",
+    const isEditMode = state.clientFormMode === "edit";
+    const targetId = state.editingClientId;
+    const endpoint = isEditMode ? `/api/clients/${targetId}` : "/api/clients";
+    const method = isEditMode ? "PUT" : "POST";
+
+    if (isEditMode && !targetId) {
+      throw new Error("No client selected for editing");
+    }
+
+    const response = await fetch(endpoint, {
+      method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name,
@@ -615,13 +669,43 @@ async function handleCreateClientSubmit() {
         notes,
       }),
     });
-    if (!response.ok) throw new Error("Unable to create client");
+    if (!response.ok) {
+      throw new Error(isEditMode ? "Unable to update client" : "Unable to create client");
+    }
+
+    let createdId = null;
+    try {
+      const payload = await response.json();
+      if (payload && typeof payload === "object") {
+        createdId = payload.id ?? null;
+      }
+    } catch (error) {
+      // ignore JSON parsing errors for empty responses
+    }
+
+    if (!isEditMode && createdId) {
+      state.currentClientId = String(createdId);
+      state.clientSelectionTouched = true;
+    }
+
     await loadOverview();
-    form.reset();
-    setClientFormStatus("Client created successfully.", "success");
-    elements.clientFormName?.focus();
+
+    if (isEditMode) {
+      setClientFormStatus("Client updated successfully.", "success");
+      window.setTimeout(() => {
+        closeClientModal();
+      }, 600);
+    } else {
+      form.reset();
+      setClientFormStatus("Client created successfully.", "success");
+      elements.clientFormName?.focus();
+    }
   } catch (error) {
-    setClientFormStatus(error.message || "Unable to create client.", "error");
+    const isEditMode = state.clientFormMode === "edit";
+    setClientFormStatus(
+      error.message || (isEditMode ? "Unable to update client." : "Unable to create client."),
+      "error",
+    );
   } finally {
     setClientFormBusy(false);
   }
@@ -632,14 +716,24 @@ function reportError(error) {
   window.alert(error.message || "An unexpected error occurred.");
 }
 
-function openClientModal(trigger = null) {
+function openCreateClientModal(trigger = null) {
+  prepareClientForm("create");
+  showClientModal(trigger);
+}
+
+function openEditClientModal(client, trigger = null) {
+  if (!client) return;
+  prepareClientForm("edit", client);
+  showClientModal(trigger);
+}
+
+function showClientModal(trigger = null) {
   if (!elements.clientModal) return;
   clientModalTrigger = trigger instanceof HTMLElement ? trigger : document.activeElement;
   if (state.isClientModalOpen) {
     elements.clientFormName?.focus();
     return;
   }
-  resetClientForm();
   setClientFormBusy(false);
   elements.clientModal.classList.remove("hidden");
   elements.clientModal.setAttribute("aria-hidden", "false");
@@ -656,17 +750,94 @@ function closeClientModal() {
   elements.clientModal.setAttribute("aria-hidden", "true");
   document.body.classList.remove("modal-open");
   state.isClientModalOpen = false;
-  resetClientForm();
-  setClientFormBusy(false);
   if (clientModalTrigger && typeof clientModalTrigger.focus === "function") {
     clientModalTrigger.focus();
   }
   clientModalTrigger = null;
+  resetClientForm();
+  setClientFormBusy(false);
 }
 
 function resetClientForm() {
+  state.clientFormMode = "create";
+  state.editingClientId = null;
   elements.clientForm?.reset();
   setClientFormStatus("");
+  updateClientFormText();
+}
+
+function prepareClientForm(mode, client = null) {
+  state.clientFormMode = mode === "edit" ? "edit" : "create";
+  state.editingClientId = mode === "edit" && client ? client.id : null;
+  setClientFormStatus("");
+  if (mode === "edit" && client) {
+    populateClientFormFromRecord(client);
+  } else {
+    elements.clientForm?.reset();
+  }
+  updateClientFormText(client);
+}
+
+function populateClientFormFromRecord(client) {
+  if (!elements.clientForm) return;
+  elements.clientFormName && (elements.clientFormName.value = client.name || "");
+  elements.clientFormCandidate && (elements.clientFormCandidate.value = client.candidate || "");
+  elements.clientFormOffice && (elements.clientFormOffice.value = client.office || "");
+  const managerName = client.manager_name ?? client.managerName ?? "";
+  if (elements.clientFormManager) {
+    elements.clientFormManager.value = managerName;
+  }
+  const contactEmail = client.contact_email ?? client.contactEmail ?? "";
+  if (elements.clientFormEmail) {
+    elements.clientFormEmail.value = contactEmail;
+  }
+  const contactPhone = client.contact_phone ?? client.contactPhone ?? "";
+  if (elements.clientFormPhone) {
+    elements.clientFormPhone.value = contactPhone;
+  }
+  const launchDate = client.launch_date ?? client.launchDate ?? "";
+  if (elements.clientFormLaunch) {
+    elements.clientFormLaunch.value = launchDate;
+  }
+  const fundraisingGoal = client.fundraising_goal ?? client.fundraisingGoal ?? "";
+  if (elements.clientFormGoal) {
+    elements.clientFormGoal.value = fundraisingGoal === null ? "" : String(fundraisingGoal);
+  }
+  const sheetUrl = client.sheet_url ?? client.sheetUrl ?? "";
+  if (elements.clientFormSheet) {
+    elements.clientFormSheet.value = sheetUrl;
+  }
+  if (elements.clientFormNotes) {
+    elements.clientFormNotes.value = client.notes || "";
+  }
+}
+
+function updateClientFormText(client = null) {
+  const isEditMode = state.clientFormMode === "edit";
+  if (elements.clientModalTitle) {
+    elements.clientModalTitle.textContent = isEditMode ? "Edit campaign client" : "New campaign client";
+  }
+  if (elements.clientModalDescription) {
+    elements.clientModalDescription.textContent = isEditMode
+      ? "Update the details so fundraisers stay aligned."
+      : "Capture the key details so fundraisers have the context they need.";
+  }
+  if (elements.clientFormSubmit) {
+    elements.clientFormSubmit.textContent = getClientFormSubmitLabel();
+  }
+  if (elements.editClient) {
+    elements.editClient.disabled = !Boolean(getCurrentClient());
+  }
+  if (client && isEditMode && elements.clientFormName) {
+    window.requestAnimationFrame(() => {
+      elements.clientFormName?.focus();
+      elements.clientFormName?.select?.();
+    });
+  }
+}
+
+function getClientFormSubmitLabel() {
+  return state.clientFormMode === "edit" ? "Save changes" : "Create client";
 }
 
 function handleClientModalKeydown(event) {
@@ -680,13 +851,16 @@ function handleClientModalKeydown(event) {
 function setClientFormBusy(isBusy) {
   if (elements.clientFormSubmit) {
     elements.clientFormSubmit.disabled = isBusy;
-    elements.clientFormSubmit.textContent = isBusy ? "Saving…" : "Create client";
+    elements.clientFormSubmit.textContent = isBusy ? "Saving…" : getClientFormSubmitLabel();
   }
   if (elements.clientFormCancel) {
     elements.clientFormCancel.disabled = isBusy;
   }
   if (elements.createClient) {
     elements.createClient.disabled = isBusy;
+  }
+  if (elements.editClient && state.clientFormMode === "edit") {
+    elements.editClient.disabled = isBusy;
   }
 }
 

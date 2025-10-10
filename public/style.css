@@ -1974,6 +1974,61 @@ body.modal-open {
   gap: 2rem;
 }
 
+.card--clients .card__header {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.client-card-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.client-card-select {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.client-card-select select {
+  min-width: 220px;
+}
+
+.client-card-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-start;
+}
+
+.client-detail-grid {
+  display: block;
+}
+
+.client-item--detail {
+  margin: 0 auto;
+}
+
+@media (min-width: 640px) {
+  .card--clients .card__header {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .client-card-toolbar {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  .client-card-buttons {
+    justify-content: flex-end;
+  }
+}
+
 .manager-grid .span-2 {
   grid-column: span 2;
 }
