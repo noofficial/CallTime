@@ -1,3 +1,11 @@
+import {
+  managerFetch,
+  UnauthorizedError,
+  getManagerToken,
+  setManagerToken,
+  clearManagerSession,
+} from "./auth.js";
+
 const state = {
   clients: [],
   donors: [],
@@ -12,6 +20,8 @@ const state = {
   clientSelectionTouched: false,
   clientFormMode: "create",
   editingClientId: null,
+  hasBoundEvents: false,
+  initialized: false,
 };
 
 const elements = {
@@ -43,18 +53,145 @@ const elements = {
   clientModal: document.getElementById("client-modal"),
   clientModalTitle: document.getElementById("client-modal-title"),
   clientModalDescription: document.getElementById("client-modal-description"),
+  logout: document.getElementById("manager-logout"),
+  clientResetPassword: document.getElementById("client-reset-password"),
+};
+
+const authElements = {
+  screen: document.getElementById("manager-login-screen"),
+  form: document.getElementById("manager-login-form"),
+  password: document.getElementById("manager-login-password"),
+  status: document.getElementById("manager-login-status"),
 };
 
 let clientModalTrigger = null;
 
-init();
+bootstrap();
 
-function init() {
+function bootstrap() {
+  bindAuthEvents();
+  updateResetPasswordButtonVisibility();
+  const token = getManagerToken();
+  if (token) {
+    hideLoginScreen();
+    initializeWorkspace();
+  } else {
+    showLoginScreen();
+  }
+}
+
+async function performLogout(message = "You have been signed out.") {
+  const token = getManagerToken();
+  if (token) {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch (error) {
+      console.warn("Manager logout request failed", error);
+    }
+  }
+  clearManagerSession();
+  state.clients = [];
+  state.donors = [];
+  state.filteredDonors = [];
+  state.selectedClientId = "";
+  state.selectedClientName = "";
+  state.assignedIds = new Set();
+  state.assignedDonors = new Map();
+  state.loadingAssignments = false;
+  state.initialized = false;
+  renderClients();
+  renderDonors();
+  renderAssignmentLists();
+  showLoginScreen(message);
+}
+
+function bindAuthEvents() {
+  authElements.form?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await handleManagerLogin();
+  });
+}
+
+function showLoginScreen(message = "") {
+  authElements.screen?.classList.remove("hidden");
+  if (message && authElements.status) {
+    authElements.status.textContent = message;
+  }
+  if (authElements.password) {
+    authElements.password.value = "";
+    authElements.password.focus();
+  }
+}
+
+function hideLoginScreen() {
+  authElements.screen?.classList.add("hidden");
+  if (authElements.status) {
+    authElements.status.textContent = "";
+  }
+  if (authElements.password) {
+    authElements.password.value = "";
+  }
+}
+
+async function handleManagerLogin() {
+  if (!authElements.password) return;
+  const password = authElements.password.value.trim();
+  if (!password) {
+    if (authElements.status) {
+      authElements.status.textContent = "Enter your manager password.";
+    }
+    authElements.password.focus();
+    return;
+  }
+
+  try {
+    authElements.form?.classList.add("auth-form--busy");
+    const response = await fetch("/api/auth/manager-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    if (!response.ok) {
+      throw new Error("Invalid password. Please try again.");
+    }
+    const payload = await response.json();
+    setManagerToken(payload.token);
+    hideLoginScreen();
+    initializeWorkspace();
+  } catch (error) {
+    if (authElements.status) {
+      authElements.status.textContent = error.message || "Unable to sign in.";
+    }
+    authElements.password?.focus();
+  } finally {
+    authElements.form?.classList.remove("auth-form--busy");
+  }
+}
+
+function initializeWorkspace() {
+  if (state.initialized) {
+    refreshWorkspace();
+    return;
+  }
   bindEvents();
+  refreshWorkspace();
+  state.initialized = true;
+}
+
+function refreshWorkspace() {
   Promise.all([loadOverview(), loadDonors()]).catch((error) => reportError(error));
 }
 
+function init() {
+  initializeWorkspace();
+}
+
 function bindEvents() {
+  if (state.hasBoundEvents) return;
+  state.hasBoundEvents = true;
   elements.donorSearch?.addEventListener("input", () => {
     applyDonorFilter();
     renderDonors();
@@ -120,11 +257,19 @@ function bindEvents() {
     event.preventDefault();
     handleClientFormSubmit();
   });
+
+  elements.clientResetPassword?.addEventListener("click", () => {
+    handlePortalPasswordReset();
+  });
+
+  elements.logout?.addEventListener("click", () => {
+    performLogout();
+  });
 }
 
 async function loadOverview() {
   try {
-    const response = await fetch("/api/manager/overview");
+    const response = await managerFetch("/api/manager/overview");
     if (!response.ok) throw new Error("Unable to load manager overview");
     const data = await response.json();
     state.clients = Array.isArray(data.clients) ? data.clients : [];
@@ -138,7 +283,7 @@ async function loadOverview() {
 
 async function loadDonors() {
   try {
-    const response = await fetch("/api/manager/donors");
+    const response = await managerFetch("/api/manager/donors");
     if (!response.ok) throw new Error("Unable to load donors");
     const donors = await response.json();
     state.donors = Array.isArray(donors) ? donors : [];
@@ -153,7 +298,7 @@ async function loadDonors() {
 async function loadAssignmentsForClient(clientId) {
   try {
     state.loadingAssignments = true;
-    const response = await fetch(`/api/client/${clientId}/donors`);
+    const response = await managerFetch(`/api/client/${clientId}/donors`);
     if (!response.ok) throw new Error("Unable to load assignments for client");
     const donors = await response.json();
     state.selectedClientId = clientId;
@@ -522,7 +667,7 @@ async function handleDeleteClient(clientId) {
   if (!confirmed) return;
 
   try {
-    const response = await fetch(`/api/clients/${clientId}`, { method: "DELETE" });
+    const response = await managerFetch(`/api/clients/${clientId}`, { method: "DELETE" });
     if (!response.ok) throw new Error("Unable to delete client");
 
     if (String(state.selectedClientId) === String(clientId)) {
@@ -557,7 +702,7 @@ async function handleDeleteDonor(donorId) {
   if (!confirmed) return;
 
   try {
-    const response = await fetch(`/api/donors/${donorId}`, { method: "DELETE" });
+    const response = await managerFetch(`/api/donors/${donorId}`, { method: "DELETE" });
     if (!response.ok) throw new Error("Unable to delete donor");
 
     await loadOverview();
@@ -582,7 +727,7 @@ function renderAssignmentCard(donor, mode) {
 
 async function assignDonor(clientId, donorId) {
   try {
-    const response = await fetch("/api/manager/assign-donor", {
+    const response = await managerFetch("/api/manager/assign-donor", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ clientId, donorId }),
@@ -598,7 +743,7 @@ async function assignDonor(clientId, donorId) {
 
 async function unassignDonor(clientId, donorId) {
   try {
-    const response = await fetch(`/api/manager/assign-donor/${clientId}/${donorId}`, {
+    const response = await managerFetch(`/api/manager/assign-donor/${clientId}/${donorId}`, {
       method: "DELETE",
     });
     if (!response.ok) throw new Error("Unable to remove donor assignment");
@@ -610,6 +755,22 @@ async function unassignDonor(clientId, donorId) {
   }
 }
 
+function readClientFormValues() {
+  return {
+    name: elements.clientFormName?.value.trim() || "",
+    candidate: elements.clientFormCandidate?.value.trim() || "",
+    office: elements.clientFormOffice?.value.trim() || "",
+    managerName: elements.clientFormManager?.value.trim() || "",
+    contactEmail: elements.clientFormEmail?.value.trim() || "",
+    contactPhone: elements.clientFormPhone?.value.trim() || "",
+    launchDate: elements.clientFormLaunch?.value.trim() || "",
+    goalInput: elements.clientFormGoal?.value.trim() || "",
+    fundraisingGoal: parseFundraisingGoal(elements.clientFormGoal?.value.trim() || ""),
+    sheetUrl: elements.clientFormSheet?.value.trim() || "",
+    notes: elements.clientFormNotes?.value.trim() || "",
+  };
+}
+
 async function handleClientFormSubmit() {
   const form = elements.clientForm;
   if (!form) return;
@@ -617,23 +778,27 @@ async function handleClientFormSubmit() {
     return;
   }
 
-  const name = elements.clientFormName?.value.trim() || "";
-  const candidate = elements.clientFormCandidate?.value.trim() || "";
-  const office = elements.clientFormOffice?.value.trim() || "";
-  const managerName = elements.clientFormManager?.value.trim() || "";
-  const contactEmail = elements.clientFormEmail?.value.trim() || "";
-  const contactPhone = elements.clientFormPhone?.value.trim() || "";
-  const launchDate = elements.clientFormLaunch?.value.trim() || "";
-  const goalInput = elements.clientFormGoal?.value.trim() || "";
-  const sheetUrl = elements.clientFormSheet?.value.trim() || "";
-  const notes = elements.clientFormNotes?.value.trim() || "";
+  const values = readClientFormValues();
+  const {
+    name,
+    candidate,
+    office,
+    managerName,
+    contactEmail,
+    contactPhone,
+    launchDate,
+    goalInput,
+    fundraisingGoal,
+    sheetUrl,
+    notes,
+  } = values;
+
   if (!name) {
     setClientFormStatus("Campaign name is required.", "error");
     elements.clientFormName?.focus();
     return;
   }
 
-  const fundraisingGoal = parseFundraisingGoal(goalInput);
   if (goalInput && fundraisingGoal === null) {
     setClientFormStatus("Enter a valid fundraising goal amount.", "error");
     elements.clientFormGoal?.focus();
@@ -653,21 +818,23 @@ async function handleClientFormSubmit() {
       throw new Error("No client selected for editing");
     }
 
-    const response = await fetch(endpoint, {
+    const payload = {
+      name,
+      candidate,
+      office,
+      managerName,
+      contactEmail,
+      contactPhone,
+      launchDate,
+      fundraisingGoal,
+      sheetUrl,
+      notes,
+    };
+
+    const response = await managerFetch(endpoint, {
       method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name,
-        candidate,
-        office,
-        managerName,
-        contactEmail,
-        contactPhone,
-        launchDate,
-        fundraisingGoal,
-        sheetUrl,
-        notes,
-      }),
+      body: JSON.stringify(payload),
     });
     if (!response.ok) {
       throw new Error(isEditMode ? "Unable to update client" : "Unable to create client");
@@ -711,7 +878,67 @@ async function handleClientFormSubmit() {
   }
 }
 
+async function handlePortalPasswordReset() {
+  if (state.clientFormMode !== "edit" || !state.editingClientId) {
+    setClientFormStatus("Open a client in edit mode to reset their password.", "error");
+    return;
+  }
+
+  const values = readClientFormValues();
+  if (!values.name) {
+    setClientFormStatus("Add a campaign name before resetting the password.", "error");
+    elements.clientFormName?.focus();
+    return;
+  }
+
+  if (values.goalInput && values.fundraisingGoal === null) {
+    setClientFormStatus("Enter a valid fundraising goal before resetting the password.", "error");
+    elements.clientFormGoal?.focus();
+    return;
+  }
+
+  setClientFormBusy(true);
+  setClientFormStatus("Resetting portal password…");
+
+  try {
+    const response = await managerFetch(`/api/clients/${state.editingClientId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: values.name,
+        candidate: values.candidate,
+        office: values.office,
+        managerName: values.managerName,
+        contactEmail: values.contactEmail,
+        contactPhone: values.contactPhone,
+        launchDate: values.launchDate,
+        fundraisingGoal: values.fundraisingGoal,
+        sheetUrl: values.sheetUrl,
+        notes: values.notes,
+        resetPortalPassword: true,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error("Unable to reset the portal password.");
+    }
+
+    setClientFormStatus(
+      "Portal password reset. Ask the client to sign in with password and choose a new one.",
+      "success"
+    );
+  } catch (error) {
+    setClientFormStatus(error.message || "Unable to reset the portal password.", "error");
+  } finally {
+    setClientFormBusy(false);
+  }
+}
+
 function reportError(error) {
+  if (error instanceof UnauthorizedError) {
+    performLogout("Sign in to access the manager workspace.");
+    return;
+  }
   console.error(error);
   window.alert(error.message || "An unexpected error occurred.");
 }
@@ -764,6 +991,7 @@ function resetClientForm() {
   elements.clientForm?.reset();
   setClientFormStatus("");
   updateClientFormText();
+  updateResetPasswordButtonVisibility();
 }
 
 function prepareClientForm(mode, client = null) {
@@ -776,6 +1004,7 @@ function prepareClientForm(mode, client = null) {
     elements.clientForm?.reset();
   }
   updateClientFormText(client);
+  updateResetPasswordButtonVisibility();
 }
 
 function populateClientFormFromRecord(client) {
@@ -836,6 +1065,17 @@ function updateClientFormText(client = null) {
   }
 }
 
+function updateResetPasswordButtonVisibility() {
+  if (!elements.clientResetPassword) return;
+  if (state.clientFormMode === "edit") {
+    elements.clientResetPassword.classList.remove("hidden");
+    elements.clientResetPassword.disabled = false;
+  } else {
+    elements.clientResetPassword.classList.add("hidden");
+    elements.clientResetPassword.disabled = true;
+  }
+}
+
 function getClientFormSubmitLabel() {
   return state.clientFormMode === "edit" ? "Save changes" : "Create client";
 }
@@ -861,6 +1101,9 @@ function setClientFormBusy(isBusy) {
   }
   if (elements.editClient && state.clientFormMode === "edit") {
     elements.editClient.disabled = isBusy;
+  }
+  if (elements.clientResetPassword) {
+    elements.clientResetPassword.disabled = isBusy || state.clientFormMode !== "edit";
   }
 }
 
