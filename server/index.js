@@ -202,6 +202,16 @@ const enhanceSchema = () => {
         ensureColumn('clients', 'launch_date', 'launch_date TEXT')
         ensureColumn('clients', 'fundraising_goal', 'fundraising_goal REAL')
         ensureColumn('clients', 'notes', 'notes TEXT')
+        ensureColumn('donor_assignments', 'priority_level', 'priority_level INTEGER DEFAULT 1')
+        ensureColumn('donor_assignments', 'is_active', 'is_active BOOLEAN DEFAULT 1')
+        ensureColumn('donor_assignments', 'assigned_by', 'assigned_by TEXT')
+        ensureColumn('donor_assignments', 'assignment_notes', 'assignment_notes TEXT')
+        ensureColumn('client_donor_notes', 'note_type', "note_type TEXT NOT NULL DEFAULT 'general'")
+        ensureColumn('client_donor_notes', 'note_content', 'note_content TEXT')
+        ensureColumn('client_donor_notes', 'is_private', 'is_private BOOLEAN DEFAULT 1')
+        ensureColumn('client_donor_notes', 'is_important', 'is_important BOOLEAN DEFAULT 0')
+        ensureColumn('client_donor_notes', 'created_at', 'created_at DATETIME DEFAULT CURRENT_TIMESTAMP')
+        ensureColumn('client_donor_notes', 'updated_at', 'updated_at DATETIME DEFAULT CURRENT_TIMESTAMP')
         console.log('Enhanced schema applied successfully')
     } catch (error) {
         console.error('Schema enhancement error:', error.message)
@@ -950,38 +960,56 @@ function getDonorDetail(donorId) {
         return null
     }
 
-    const history = db.prepare(`
-        SELECT id, year, candidate, amount
-        FROM giving_history
-        WHERE donor_id = ?
-        ORDER BY year DESC, created_at DESC
-    `).all(donorId)
+    let history = []
+    try {
+        history = db.prepare(`
+            SELECT id, year, candidate, amount
+            FROM giving_history
+            WHERE donor_id = ?
+            ORDER BY year DESC, created_at DESC
+        `).all(donorId)
+    } catch (error) {
+        console.warn('Failed to load giving history for donor', donorId, error.message)
+        history = []
+    }
 
-    const assignmentRows = db.prepare(`
-        SELECT c.id, c.name
-        FROM donor_assignments da
-        JOIN clients c ON da.client_id = c.id
-        WHERE da.donor_id = ? AND da.is_active = 1
-        ORDER BY c.name
-    `).all(donorId)
+    let assignmentRows = []
+    try {
+        assignmentRows = db.prepare(`
+            SELECT c.id, c.name
+            FROM donor_assignments da
+            JOIN clients c ON da.client_id = c.id
+            WHERE da.donor_id = ? AND da.is_active = 1
+            ORDER BY c.name
+        `).all(donorId)
+    } catch (error) {
+        console.warn('Failed to load donor assignments for donor', donorId, error.message)
+        assignmentRows = []
+    }
 
-    const noteRows = db.prepare(`
-        SELECT
-            n.id,
-            n.client_id,
-            c.name AS client_name,
-            c.candidate AS client_candidate,
-            n.note_type,
-            n.note_content,
-            n.is_private,
-            n.is_important,
-            n.created_at,
-            n.updated_at
-        FROM client_donor_notes n
-        LEFT JOIN clients c ON n.client_id = c.id
-        WHERE n.donor_id = ?
-        ORDER BY n.created_at DESC
-    `).all(donorId)
+    let noteRows = []
+    try {
+        noteRows = db.prepare(`
+            SELECT
+                n.id,
+                n.client_id,
+                c.name AS client_name,
+                c.candidate AS client_candidate,
+                n.note_type,
+                n.note_content,
+                n.is_private,
+                n.is_important,
+                n.created_at,
+                n.updated_at
+            FROM client_donor_notes n
+            LEFT JOIN clients c ON n.client_id = c.id
+            WHERE n.donor_id = ?
+            ORDER BY n.created_at DESC
+        `).all(donorId)
+    } catch (error) {
+        console.warn('Failed to load client donor notes for donor', donorId, error.message)
+        noteRows = []
+    }
 
     const notesByClient = new Map()
     noteRows.forEach((row) => {
