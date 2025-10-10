@@ -318,9 +318,23 @@ function setStatus(message, type) {
 }
 
 async function fetchJson(url, options) {
-  const response = await fetch(url, options);
-  if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+  try {
+    const response = await managerFetch(url, options);
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+    return response.status === 204 ? null : response.json();
+  } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      handleUnauthorized();
+    }
+    throw error;
   }
-  return response.status === 204 ? null : response.json();
 }
+import { managerFetch, UnauthorizedError, clearManagerSession } from "./auth.js";
+
+function handleUnauthorized() {
+  clearManagerSession();
+  window.location.href = "manager.html";
+}
+

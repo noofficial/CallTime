@@ -32,6 +32,24 @@ python -m http.server 8000
 
 Then navigate to <http://localhost:8000>.
 
+## Authentication
+
+The manager workspace and client portal now require passwords.
+
+- **Manager access:** the dashboard ships with a built-in password of
+  `10231972Fn*`. You can override it by setting `MANAGER_PASSWORD` or supply a
+  precomputed PBKDF2 hash via `MANAGER_PASSWORD_HASH` when starting the API.
+
+- **Client access:** new campaigns are provisioned with the temporary password
+  `password`. Fundraisers select their campaign from the login list, enter the
+  temporary password, and are immediately prompted to create a new one on first
+  sign-in. Managers can reset a portal back to the default from the client
+  editor if needed. Set `DEFAULT_CLIENT_PORTAL_PASSWORD` in the environment if
+  you want a different temporary password when the server boots.
+
+Sessions last eight hours and can be ended with the **Log out** button in either
+the manager workspace or client portal.
+
 ## Using the donor database
 
 Open the **Donor database** window from the global toolbar or the active client
