@@ -3,6 +3,7 @@ import {
   refreshDonorEditorClients,
   resetDonorEditorForm,
 } from "./donor-editor.js";
+import { managerFetch, UnauthorizedError, getManagerToken, clearManagerSession } from "./auth.js";
 
 const state = {
   donors: [],
@@ -52,7 +53,19 @@ configureDonorEditor({
   },
 });
 
+ensureManagerAccess();
 init();
+
+function ensureManagerAccess() {
+  if (!getManagerToken()) {
+    window.location.href = "manager.html";
+  }
+}
+
+function handleUnauthorized() {
+  clearManagerSession();
+  window.location.href = "manager.html";
+}
 
 async function init() {
   bindEvents();
@@ -1259,11 +1272,18 @@ async function exportDonors() {
 }
 
 async function fetchJson(url, options) {
-  const response = await fetch(url, options);
-  if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+  try {
+    const response = await managerFetch(url, options);
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+    return response.status === 204 ? null : response.json();
+  } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      handleUnauthorized();
+    }
+    throw error;
   }
-  return response.status === 204 ? null : response.json();
 }
 
 function escapeHtml(value) {

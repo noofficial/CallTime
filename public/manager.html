@@ -7,6 +7,18 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body class="workspace workspace--manager">
+  <div class="auth-screen hidden" id="manager-login-screen" role="dialog" aria-modal="true">
+    <div class="auth-panel">
+      <h1>Manager sign in</h1>
+      <p class="muted">Enter the manager password to access assignments and donor data.</p>
+      <form id="manager-login-form" class="auth-form">
+        <label class="form-label" for="manager-login-password">Manager password</label>
+        <input class="form-control" id="manager-login-password" type="password" autocomplete="current-password" required />
+        <button class="btn btn--primary btn--block" type="submit">Sign in</button>
+        <p class="auth-status" id="manager-login-status" role="alert"></p>
+      </form>
+    </div>
+  </div>
   <header class="dashboard-header">
     <div class="container">
       <div class="header-content">
@@ -17,6 +29,7 @@
         <nav class="header-actions">
           <a class="btn btn--ghost" href="index.html">Back to landing</a>
           <a class="btn btn--outline" href="donors.html">Donor database</a>
+          <button class="btn btn--ghost" type="button" id="manager-logout">Log out</button>
         </nav>
       </div>
     </div>
@@ -192,6 +205,18 @@
                 step="1000"
                 placeholder="500000"
               />
+            </div>
+            <div class="form-row">
+              <label class="form-label" for="client-form-password">Client portal password</label>
+              <input
+                class="form-control"
+                id="client-form-password"
+                name="portalPassword"
+                type="password"
+                autocomplete="new-password"
+                placeholder="Set or reset password"
+              />
+              <p class="form-help">Set the password clients will use to access their portal. Leave blank to keep the existing password.</p>
             </div>
             <div class="form-row form-row--full">
               <label class="form-label" for="client-form-sheet">Data source URL</label>

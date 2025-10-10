@@ -1,3 +1,11 @@
+import {
+  clientFetch,
+  UnauthorizedError,
+  getClientSession,
+  setClientSession,
+  clearClientSession,
+} from "./auth.js";
+
 const CALL_STATUSES = [
   "Not Contacted",
   "No Answer - Left Message",
@@ -25,6 +33,8 @@ const state = {
   sessionCallsAttempted: 0,
   sessionCallsCompleted: 0,
   sessionPledged: 0,
+  hasBoundEvents: false,
+  initialized: false,
 };
 
 const elements = {
@@ -46,41 +56,191 @@ const elements = {
   followupDate: document.getElementById("followup-date"),
   saveOutcome: document.getElementById("save-outcome"),
   outcomeStatus: document.getElementById("outcome-status"),
+  logout: document.getElementById("client-logout"),
 };
 
-init();
+const authElements = {
+  screen: document.getElementById("client-login-screen"),
+  form: document.getElementById("client-login-form"),
+  clientId: document.getElementById("client-login-id"),
+  password: document.getElementById("client-login-password"),
+  status: document.getElementById("client-login-status"),
+};
 
-function init() {
+bootstrap();
+
+function bootstrap() {
+  bindAuthEvents();
   bindEvents();
   populateStatusOptions();
-  loadClients();
+  populateClientSelector();
+  const session = getClientSession();
   const params = new URLSearchParams(window.location.search);
-  const initialClient = params.get("clientId");
-  if (initialClient) {
-    state.selectedClientId = initialClient;
+  const urlClientId = params.get("clientId");
+  if (!session.clientId && urlClientId && authElements.clientId) {
+    authElements.clientId.value = urlClientId;
+  }
+  if (session.token && session.clientId) {
+    hideLoginScreen();
+    initializeClientSession(session.clientId, session.clientName);
+  } else {
+    showLoginScreen();
   }
 }
 
-function bindEvents() {
-  elements.selector?.addEventListener("change", () => {
-    const clientId = elements.selector.value;
-    if (!clientId) {
-      state.selectedClientId = "";
-      state.selectedClientName = "";
-      state.donors = [];
-      state.filteredDonors = [];
-      renderQueue();
-      elements.title.textContent = "Client call portal";
-      elements.stats.textContent = "Select your campaign to begin.";
-      return;
-    }
-    state.selectedClientId = clientId;
-    const selectedOption = elements.selector.options[elements.selector.selectedIndex];
-    state.selectedClientName = selectedOption?.textContent || "";
-    elements.title.textContent = selectedOption?.textContent || "Client call portal";
-    loadDonorQueue();
+function bindAuthEvents() {
+  authElements.form?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await handleClientLogin();
   });
+}
 
+function showLoginScreen(message = "") {
+  if (authElements.status) {
+    authElements.status.textContent = message;
+  }
+  authElements.screen?.classList.remove("hidden");
+  if (elements.selector) {
+    elements.selector.disabled = true;
+  }
+  if (authElements.password) {
+    authElements.password.value = "";
+    authElements.password.focus();
+  }
+}
+
+function hideLoginScreen() {
+  authElements.screen?.classList.add("hidden");
+  if (authElements.status) {
+    authElements.status.textContent = "";
+  }
+  if (authElements.password) {
+    authElements.password.value = "";
+  }
+}
+
+async function handleClientLogin() {
+  if (!authElements.clientId || !authElements.password) return;
+  const clientIdValue = authElements.clientId.value.trim();
+  const password = authElements.password.value.trim();
+
+  if (!clientIdValue) {
+    authElements.status && (authElements.status.textContent = "Enter your campaign ID.");
+    authElements.clientId.focus();
+    return;
+  }
+
+  const clientId = Number(clientIdValue);
+  if (!Number.isInteger(clientId) || clientId <= 0) {
+    authElements.status && (authElements.status.textContent = "Campaign ID must be a positive number.");
+    authElements.clientId.focus();
+    return;
+  }
+
+  if (!password) {
+    authElements.status && (authElements.status.textContent = "Enter your portal password.");
+    authElements.password.focus();
+    return;
+  }
+
+  try {
+    authElements.form?.classList.add("auth-form--busy");
+    const response = await fetch("/api/auth/client-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientId, password }),
+    });
+    if (!response.ok) {
+      throw new Error("Invalid campaign ID or password.");
+    }
+    const payload = await response.json();
+    const clientName = payload.client?.name || payload.client?.candidate || "";
+    setClientSession({ token: payload.token, clientId: payload.client?.id, clientName });
+    hideLoginScreen();
+    initializeClientSession(payload.client?.id, clientName, payload.client?.candidate || "");
+  } catch (error) {
+    if (authElements.status) {
+      authElements.status.textContent = error.message || "Unable to sign in.";
+    }
+    authElements.password?.focus();
+  } finally {
+    authElements.form?.classList.remove("auth-form--busy");
+  }
+}
+
+function initializeClientSession(clientId, clientName = "", clientCandidate = "") {
+  if (!clientId) return;
+  state.clients = [
+    {
+      id: String(clientId),
+      name: clientName,
+      candidate: clientCandidate,
+    },
+  ];
+  state.selectedClientId = String(clientId);
+  state.selectedClientName = clientName || clientCandidate || `Campaign ${clientId}`;
+  populateClientSelector();
+  updateClientTitle();
+  state.initialized = true;
+  loadDonorQueue();
+}
+
+function updateClientTitle() {
+  const title = state.selectedClientName || "Client call portal";
+  if (elements.title) {
+    elements.title.textContent = title;
+  }
+}
+
+async function performLogout(message = "You have been signed out.") {
+  const session = getClientSession();
+  if (session.token) {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.token}` },
+      });
+    } catch (error) {
+      console.warn("Client logout request failed", error);
+    }
+  }
+  if (authElements.clientId) {
+    authElements.clientId.value = session.clientId ? String(session.clientId) : authElements.clientId.value || "";
+  }
+  clearClientSession();
+  state.clients = [];
+  state.selectedClientId = "";
+  state.selectedClientName = "";
+  state.donors = [];
+  state.filteredDonors = [];
+  state.selectedDonorId = "";
+  state.donorDetails = null;
+  state.sessionId = null;
+  state.sessionStart = null;
+  state.sessionCallsAttempted = 0;
+  state.sessionCallsCompleted = 0;
+  state.sessionPledged = 0;
+  populateClientSelector();
+  if (elements.queue) {
+    elements.queue.innerHTML = `<p class="muted">Sign in to access your call queue.</p>`;
+  }
+  hideDonorDetails();
+  if (elements.stats) {
+    elements.stats.textContent = "Sign in to access your call queue.";
+  }
+  if (elements.title) {
+    elements.title.textContent = "Client call portal";
+  }
+  showLoginScreen(message);
+}
+
+function handleUnauthorized(message = "Session expired. Please sign in again.") {
+  performLogout(message);
+}
+
+function bindEvents() {
+  if (state.hasBoundEvents) return;
+  state.hasBoundEvents = true;
   elements.filter?.addEventListener("change", () => {
     applyFilter();
     renderQueue();
@@ -112,44 +272,41 @@ function bindEvents() {
       startSession();
     }
   });
-}
 
-async function loadClients() {
-  try {
-    const response = await fetch("/api/clients");
-    if (!response.ok) throw new Error("Unable to load clients");
-    const clients = await response.json();
-    state.clients = Array.isArray(clients) ? clients : [];
-    populateClientSelector();
-    if (state.selectedClientId) {
-      elements.selector.value = state.selectedClientId;
-      elements.selector.dispatchEvent(new Event("change"));
-    }
-  } catch (error) {
-    reportError(error);
-  }
+  elements.logout?.addEventListener("click", () => {
+    performLogout();
+  });
 }
 
 function populateClientSelector() {
   const select = elements.selector;
   if (!select) return;
   select.innerHTML = "";
-  const placeholder = document.createElement("option");
-  placeholder.value = "";
-  placeholder.textContent = "Select your campaign";
-  select.append(placeholder);
-  state.clients.forEach((client) => {
-    const option = document.createElement("option");
-    option.value = client.id;
-    option.textContent = client.name || client.candidate || "Unnamed campaign";
-    select.append(option);
-  });
+  if (!state.clients.length) {
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Sign in to access your campaign";
+    select.append(placeholder);
+    select.disabled = true;
+    return;
+  }
+
+  const client = state.clients[0];
+  const option = document.createElement("option");
+  option.value = client.id;
+  option.textContent = client.name || client.candidate || "Your campaign";
+  select.append(option);
+  select.value = client.id;
+  select.disabled = true;
 }
 
 async function loadDonorQueue() {
   if (!state.selectedClientId) return;
   try {
-    const response = await fetch(`/api/client/${state.selectedClientId}/donors`);
+    if (elements.stats) {
+      elements.stats.textContent = "Loading call queue…";
+    }
+    const response = await clientFetch(`/api/client/${state.selectedClientId}/donors`);
     if (!response.ok) throw new Error("Unable to load donor queue");
     const donors = await response.json();
     state.donors = Array.isArray(donors) ? donors : [];
@@ -227,7 +384,7 @@ function updateClientStats() {
 async function showDonorDetails(donorId) {
   if (!state.selectedClientId || !donorId) return;
   try {
-    const response = await fetch(`/api/client/${state.selectedClientId}/donor/${donorId}`);
+    const response = await clientFetch(`/api/client/${state.selectedClientId}/donor/${donorId}`);
     if (!response.ok) throw new Error("Unable to load donor details");
     const details = await response.json();
     state.donorDetails = details;
@@ -390,7 +547,7 @@ async function recordCallOutcome() {
       callDuration: null,
       callQuality: null,
     };
-    const response = await fetch(`/api/client/${state.selectedClientId}/call-outcome`, {
+    const response = await clientFetch(`/api/client/${state.selectedClientId}/call-outcome`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -416,7 +573,7 @@ async function recordCallOutcome() {
 
 async function startSession() {
   try {
-    const response = await fetch(`/api/client/${state.selectedClientId}/start-session`, {
+    const response = await clientFetch(`/api/client/${state.selectedClientId}/start-session`, {
       method: "POST",
     });
     if (!response.ok) throw new Error("Unable to start session");
@@ -436,7 +593,7 @@ async function startSession() {
 async function endSession() {
   if (!state.sessionId) return;
   try {
-    const response = await fetch(`/api/client/${state.selectedClientId}/end-session/${state.sessionId}`, {
+    const response = await clientFetch(`/api/client/${state.selectedClientId}/end-session/${state.sessionId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -481,6 +638,10 @@ function formatDate(value) {
 }
 
 function reportError(error) {
+  if (error instanceof UnauthorizedError) {
+    handleUnauthorized();
+    return;
+  }
   console.error(error);
   window.alert(error.message || "Something went wrong");
 }
