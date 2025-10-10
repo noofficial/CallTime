@@ -10,15 +10,34 @@
   <div class="auth-screen hidden" id="client-login-screen" role="dialog" aria-modal="true">
     <div class="auth-panel">
       <h1>Client portal sign in</h1>
-      <p class="muted">Enter your campaign ID and password to access your private call queue.</p>
+      <p class="muted">Select your campaign and enter the temporary password provided by your manager.</p>
       <form id="client-login-form" class="auth-form">
-        <label class="form-label" for="client-login-id">Campaign ID</label>
-        <input class="form-control" id="client-login-id" type="number" min="1" autocomplete="username" required />
+        <label class="form-label" for="client-login-selector">Campaign</label>
+        <select class="form-control" id="client-login-selector" autocomplete="username" required>
+          <option value="">Select your campaign…</option>
+        </select>
         <label class="form-label" for="client-login-password">Portal password</label>
         <input class="form-control" id="client-login-password" type="password" autocomplete="current-password" required />
-        <p class="form-help">Your campaign manager can confirm your campaign ID.</p>
+        <p class="form-help">New campaigns start with the password <strong>password</strong>.</p>
         <button class="btn btn--primary btn--block" type="submit">Sign in</button>
         <p class="auth-status" id="client-login-status" role="alert"></p>
+      </form>
+    </div>
+  </div>
+  <div class="auth-screen hidden" id="client-password-reset-screen" role="dialog" aria-modal="true">
+    <div class="auth-panel">
+      <h1>Update your password</h1>
+      <p class="muted" id="client-password-reset-description">
+        Your temporary password must be replaced before you can access your call portal.
+      </p>
+      <form id="client-password-reset-form" class="auth-form">
+        <label class="form-label" for="client-new-password">New password</label>
+        <input class="form-control" id="client-new-password" type="password" minlength="6" autocomplete="new-password" required />
+        <label class="form-label" for="client-confirm-password">Confirm new password</label>
+        <input class="form-control" id="client-confirm-password" type="password" minlength="6" autocomplete="new-password" required />
+        <button class="btn btn--primary btn--block" type="submit">Save new password</button>
+        <button class="btn btn--ghost btn--block" type="button" id="client-password-reset-cancel">Sign out</button>
+        <p class="auth-status" id="client-password-reset-status" role="alert"></p>
       </form>
     </div>
   </div>

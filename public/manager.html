@@ -207,16 +207,13 @@
               />
             </div>
             <div class="form-row">
-              <label class="form-label" for="client-form-password">Client portal password</label>
-              <input
-                class="form-control"
-                id="client-form-password"
-                name="portalPassword"
-                type="password"
-                autocomplete="new-password"
-                placeholder="Set or reset password"
-              />
-              <p class="form-help">Set the password clients will use to access their portal. Leave blank to keep the existing password.</p>
+              <div class="form-help form-help--notice">
+                Client portals start with the temporary password <strong>password</strong>. Clients must create a new password the
+                first time they sign in.
+              </div>
+              <button class="btn btn--sm btn--outline" type="button" id="client-reset-password">
+                Reset portal password
+              </button>
             </div>
             <div class="form-row form-row--full">
               <label class="form-label" for="client-form-sheet">Data source URL</label>

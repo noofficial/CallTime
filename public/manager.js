@@ -55,6 +55,7 @@ const elements = {
   clientModalTitle: document.getElementById("client-modal-title"),
   clientModalDescription: document.getElementById("client-modal-description"),
   logout: document.getElementById("manager-logout"),
+  clientResetPassword: document.getElementById("client-reset-password"),
 };
 
 const authElements = {
@@ -70,6 +71,7 @@ bootstrap();
 
 function bootstrap() {
   bindAuthEvents();
+  updateResetPasswordButtonVisibility();
   const token = getManagerToken();
   if (token) {
     hideLoginScreen();
@@ -255,6 +257,10 @@ function bindEvents() {
   elements.clientForm?.addEventListener("submit", (event) => {
     event.preventDefault();
     handleClientFormSubmit();
+  });
+
+  elements.clientResetPassword?.addEventListener("click", () => {
+    handlePortalPasswordReset();
   });
 
   elements.logout?.addEventListener("click", () => {
@@ -750,6 +756,22 @@ async function unassignDonor(clientId, donorId) {
   }
 }
 
+function readClientFormValues() {
+  return {
+    name: elements.clientFormName?.value.trim() || "",
+    candidate: elements.clientFormCandidate?.value.trim() || "",
+    office: elements.clientFormOffice?.value.trim() || "",
+    managerName: elements.clientFormManager?.value.trim() || "",
+    contactEmail: elements.clientFormEmail?.value.trim() || "",
+    contactPhone: elements.clientFormPhone?.value.trim() || "",
+    launchDate: elements.clientFormLaunch?.value.trim() || "",
+    goalInput: elements.clientFormGoal?.value.trim() || "",
+    fundraisingGoal: parseFundraisingGoal(elements.clientFormGoal?.value.trim() || ""),
+    sheetUrl: elements.clientFormSheet?.value.trim() || "",
+    notes: elements.clientFormNotes?.value.trim() || "",
+  };
+}
+
 async function handleClientFormSubmit() {
   const form = elements.clientForm;
   if (!form) return;
@@ -757,24 +779,27 @@ async function handleClientFormSubmit() {
     return;
   }
 
-  const name = elements.clientFormName?.value.trim() || "";
-  const candidate = elements.clientFormCandidate?.value.trim() || "";
-  const office = elements.clientFormOffice?.value.trim() || "";
-  const managerName = elements.clientFormManager?.value.trim() || "";
-  const contactEmail = elements.clientFormEmail?.value.trim() || "";
-  const contactPhone = elements.clientFormPhone?.value.trim() || "";
-  const launchDate = elements.clientFormLaunch?.value.trim() || "";
-  const goalInput = elements.clientFormGoal?.value.trim() || "";
-  const sheetUrl = elements.clientFormSheet?.value.trim() || "";
-  const notes = elements.clientFormNotes?.value.trim() || "";
-  const portalPassword = elements.clientFormPassword?.value.trim() || "";
+  const values = readClientFormValues();
+  const {
+    name,
+    candidate,
+    office,
+    managerName,
+    contactEmail,
+    contactPhone,
+    launchDate,
+    goalInput,
+    fundraisingGoal,
+    sheetUrl,
+    notes,
+  } = values;
+
   if (!name) {
     setClientFormStatus("Campaign name is required.", "error");
     elements.clientFormName?.focus();
     return;
   }
 
-  const fundraisingGoal = parseFundraisingGoal(goalInput);
   if (goalInput && fundraisingGoal === null) {
     setClientFormStatus("Enter a valid fundraising goal amount.", "error");
     elements.clientFormGoal?.focus();
@@ -819,14 +844,6 @@ async function handleClientFormSubmit() {
       notes,
     };
 
-    if (isEditMode) {
-      if (portalPassword) {
-        payload.portalPassword = portalPassword;
-      }
-    } else {
-      payload.portalPassword = portalPassword;
-    }
-
     const response = await managerFetch(endpoint, {
       method,
       headers: { "Content-Type": "application/json" },
@@ -869,6 +886,62 @@ async function handleClientFormSubmit() {
       error.message || (isEditMode ? "Unable to update client." : "Unable to create client."),
       "error",
     );
+  } finally {
+    setClientFormBusy(false);
+  }
+}
+
+async function handlePortalPasswordReset() {
+  if (state.clientFormMode !== "edit" || !state.editingClientId) {
+    setClientFormStatus("Open a client in edit mode to reset their password.", "error");
+    return;
+  }
+
+  const values = readClientFormValues();
+  if (!values.name) {
+    setClientFormStatus("Add a campaign name before resetting the password.", "error");
+    elements.clientFormName?.focus();
+    return;
+  }
+
+  if (values.goalInput && values.fundraisingGoal === null) {
+    setClientFormStatus("Enter a valid fundraising goal before resetting the password.", "error");
+    elements.clientFormGoal?.focus();
+    return;
+  }
+
+  setClientFormBusy(true);
+  setClientFormStatus("Resetting portal password…");
+
+  try {
+    const response = await managerFetch(`/api/clients/${state.editingClientId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: values.name,
+        candidate: values.candidate,
+        office: values.office,
+        managerName: values.managerName,
+        contactEmail: values.contactEmail,
+        contactPhone: values.contactPhone,
+        launchDate: values.launchDate,
+        fundraisingGoal: values.fundraisingGoal,
+        sheetUrl: values.sheetUrl,
+        notes: values.notes,
+        resetPortalPassword: true,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error("Unable to reset the portal password.");
+    }
+
+    setClientFormStatus(
+      "Portal password reset. Ask the client to sign in with password and choose a new one.",
+      "success"
+    );
+  } catch (error) {
+    setClientFormStatus(error.message || "Unable to reset the portal password.", "error");
   } finally {
     setClientFormBusy(false);
   }
@@ -931,6 +1004,7 @@ function resetClientForm() {
   elements.clientForm?.reset();
   setClientFormStatus("");
   updateClientFormText();
+  updateResetPasswordButtonVisibility();
 }
 
 function prepareClientForm(mode, client = null) {
@@ -946,6 +1020,7 @@ function prepareClientForm(mode, client = null) {
     elements.clientFormPassword.value = "";
   }
   updateClientFormText(client);
+  updateResetPasswordButtonVisibility();
 }
 
 function populateClientFormFromRecord(client) {
@@ -1009,6 +1084,17 @@ function updateClientFormText(client = null) {
   }
 }
 
+function updateResetPasswordButtonVisibility() {
+  if (!elements.clientResetPassword) return;
+  if (state.clientFormMode === "edit") {
+    elements.clientResetPassword.classList.remove("hidden");
+    elements.clientResetPassword.disabled = false;
+  } else {
+    elements.clientResetPassword.classList.add("hidden");
+    elements.clientResetPassword.disabled = true;
+  }
+}
+
 function getClientFormSubmitLabel() {
   return state.clientFormMode === "edit" ? "Save changes" : "Create client";
 }
@@ -1034,6 +1120,9 @@ function setClientFormBusy(isBusy) {
   }
   if (elements.editClient && state.clientFormMode === "edit") {
     elements.editClient.disabled = isBusy;
+  }
+  if (elements.clientResetPassword) {
+    elements.clientResetPassword.disabled = isBusy || state.clientFormMode !== "edit";
   }
 }
 

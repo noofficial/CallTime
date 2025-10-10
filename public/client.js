@@ -20,6 +20,7 @@ const CALL_STATUSES = [
 ];
 
 const state = {
+  availableLoginClients: [],
   clients: [],
   selectedClientId: "",
   selectedClientName: "",
@@ -35,6 +36,9 @@ const state = {
   sessionPledged: 0,
   hasBoundEvents: false,
   initialized: false,
+  pendingPasswordReset: null,
+  preselectedLoginClientId: null,
+  loadingLoginClients: false,
 };
 
 const elements = {
@@ -62,23 +66,35 @@ const elements = {
 const authElements = {
   screen: document.getElementById("client-login-screen"),
   form: document.getElementById("client-login-form"),
-  clientId: document.getElementById("client-login-id"),
+  clientSelect: document.getElementById("client-login-selector"),
   password: document.getElementById("client-login-password"),
   status: document.getElementById("client-login-status"),
+};
+
+const passwordResetElements = {
+  screen: document.getElementById("client-password-reset-screen"),
+  form: document.getElementById("client-password-reset-form"),
+  newPassword: document.getElementById("client-new-password"),
+  confirmPassword: document.getElementById("client-confirm-password"),
+  status: document.getElementById("client-password-reset-status"),
+  cancel: document.getElementById("client-password-reset-cancel"),
+  description: document.getElementById("client-password-reset-description"),
 };
 
 bootstrap();
 
 function bootstrap() {
   bindAuthEvents();
+  bindPasswordResetEvents();
   bindEvents();
   populateStatusOptions();
   populateClientSelector();
+  loadLoginClientOptions();
   const session = getClientSession();
   const params = new URLSearchParams(window.location.search);
   const urlClientId = params.get("clientId");
-  if (!session.clientId && urlClientId && authElements.clientId) {
-    authElements.clientId.value = urlClientId;
+  if (!session.clientId && urlClientId) {
+    state.preselectedLoginClientId = String(urlClientId);
   }
   if (session.token && session.clientId) {
     hideLoginScreen();
@@ -92,6 +108,220 @@ function bindAuthEvents() {
   authElements.form?.addEventListener("submit", async (event) => {
     event.preventDefault();
     await handleClientLogin();
+  });
+}
+
+function bindPasswordResetEvents() {
+  passwordResetElements.form?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await handlePasswordReset();
+  });
+  passwordResetElements.cancel?.addEventListener("click", () => {
+    cancelPasswordReset();
+  });
+}
+
+function showLoginScreen(message = "") {
+  if (authElements.status) {
+    authElements.status.textContent = message;
+  }
+  authElements.screen?.classList.remove("hidden");
+  if (elements.selector) {
+    elements.selector.disabled = true;
+  }
+  populateLoginClientOptions();
+  if (authElements.clientSelect) {
+    const hasOptions = state.availableLoginClients.length > 0;
+    authElements.clientSelect.disabled = !hasOptions && state.loadingLoginClients;
+    if (state.preselectedLoginClientId && hasOptions) {
+      const exists = state.availableLoginClients.some(
+        (client) => String(client.id) === state.preselectedLoginClientId
+      );
+      authElements.clientSelect.value = exists ? state.preselectedLoginClientId : "";
+      if (!exists) {
+        state.preselectedLoginClientId = null;
+      }
+    } else {
+      authElements.clientSelect.value = "";
+    }
+  }
+  if (authElements.password) {
+    authElements.password.value = "";
+    authElements.password.focus();
+  }
+}
+
+function showPasswordResetScreen(clientName = "") {
+  hideLoginScreen();
+  if (passwordResetElements.status) {
+    passwordResetElements.status.textContent = "";
+  }
+  if (passwordResetElements.description) {
+    passwordResetElements.description.textContent = clientName
+      ? `${clientName} currently has a temporary password. Create a new password to continue.`
+      : "Your temporary password must be replaced before you can access your call portal.";
+  }
+  passwordResetElements.screen?.classList.remove("hidden");
+  if (passwordResetElements.newPassword) {
+    passwordResetElements.newPassword.value = "";
+    passwordResetElements.newPassword.focus();
+  }
+  if (passwordResetElements.confirmPassword) {
+    passwordResetElements.confirmPassword.value = "";
+  }
+}
+
+function hidePasswordResetScreen() {
+  passwordResetElements.screen?.classList.add("hidden");
+  if (passwordResetElements.status) {
+    passwordResetElements.status.textContent = "";
+  }
+  if (passwordResetElements.newPassword) {
+    passwordResetElements.newPassword.value = "";
+  }
+  if (passwordResetElements.confirmPassword) {
+    passwordResetElements.confirmPassword.value = "";
+  }
+}
+
+async function handlePasswordReset() {
+  if (!state.pendingPasswordReset) {
+    return;
+  }
+  const newPassword = passwordResetElements.newPassword?.value.trim() || "";
+  const confirmPassword = passwordResetElements.confirmPassword?.value.trim() || "";
+
+  if (!newPassword || newPassword.length < 6) {
+    if (passwordResetElements.status) {
+      passwordResetElements.status.textContent = "Choose a password with at least 6 characters.";
+    }
+    passwordResetElements.newPassword?.focus();
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    if (passwordResetElements.status) {
+      passwordResetElements.status.textContent = "Passwords do not match.";
+    }
+    passwordResetElements.confirmPassword?.focus();
+    return;
+  }
+
+  try {
+    passwordResetElements.form?.classList.add("auth-form--busy");
+    const { token, clientId, clientName, clientCandidate, currentPassword } =
+      state.pendingPasswordReset;
+    const response = await fetch(`/api/client/${clientId}/password`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ newPassword, currentPassword }),
+    });
+    if (!response.ok) {
+      throw new Error("Unable to update password. Try again.");
+    }
+
+    setClientSession({ token, clientId, clientName });
+    state.pendingPasswordReset = null;
+    hidePasswordResetScreen();
+    initializeClientSession(clientId, clientName, clientCandidate);
+  } catch (error) {
+    if (passwordResetElements.status) {
+      passwordResetElements.status.textContent = error.message || "Unable to update password.";
+    }
+    passwordResetElements.newPassword?.focus();
+  } finally {
+    passwordResetElements.form?.classList.remove("auth-form--busy");
+  }
+}
+
+function cancelPasswordReset() {
+  const pending = state.pendingPasswordReset;
+  state.pendingPasswordReset = null;
+  hidePasswordResetScreen();
+  if (pending?.token) {
+    fetch("/api/auth/logout", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${pending.token}` },
+    }).catch((error) => console.warn("Failed to cancel pending session", error));
+  }
+  state.preselectedLoginClientId = pending?.clientId
+    ? String(pending.clientId)
+    : state.preselectedLoginClientId;
+  clearClientSession();
+  showLoginScreen();
+  loadLoginClientOptions();
+}
+
+function hideLoginScreen() {
+  authElements.screen?.classList.add("hidden");
+  if (authElements.status) {
+    authElements.status.textContent = "";
+  }
+  if (authElements.password) {
+    authElements.password.value = "";
+  }
+  if (authElements.clientSelect) {
+    authElements.clientSelect.disabled = false;
+  }
+  if (elements.selector) {
+    elements.selector.disabled = false;
+  }
+}
+
+async function loadLoginClientOptions() {
+  if (!authElements.clientSelect) {
+    return;
+  }
+  state.loadingLoginClients = true;
+  authElements.clientSelect.disabled = true;
+  try {
+    const response = await fetch("/api/auth/clients");
+    if (!response.ok) {
+      throw new Error("Unable to load campaigns.");
+    }
+    const clients = await response.json();
+    state.availableLoginClients = Array.isArray(clients) ? clients : [];
+    populateLoginClientOptions();
+  } catch (error) {
+    console.error("Failed to load client list", error);
+    if (authElements.status) {
+      authElements.status.textContent =
+        "Unable to load campaigns. Refresh the page or contact your manager.";
+    }
+  } finally {
+    state.loadingLoginClients = false;
+    if (authElements.clientSelect) {
+      authElements.clientSelect.disabled = false;
+    }
+  }
+}
+
+function populateLoginClientOptions() {
+  if (!authElements.clientSelect) {
+    return;
+  }
+  const select = authElements.clientSelect;
+  const previousValue = select.value;
+  select.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select your campaign…";
+  select.append(placeholder);
+
+  state.availableLoginClients.forEach((client) => {
+    const option = document.createElement("option");
+    option.value = String(client.id);
+    const primary = client.name || client.candidate || `Campaign ${client.id}`;
+    const hasCandidate = Boolean(
+      client.candidate && client.candidate !== primary
+    );
+    option.textContent = hasCandidate
+      ? `${primary} – ${client.candidate}`
+      : primary;
+    select.append(option);
   });
 }
 
@@ -124,22 +354,46 @@ async function handleClientLogin() {
   const clientIdValue = authElements.clientId.value.trim();
   const password = authElements.password.value.trim();
 
+  if (state.preselectedLoginClientId) {
+    select.value = state.preselectedLoginClientId;
+    if (select.value !== state.preselectedLoginClientId) {
+      state.preselectedLoginClientId = null;
+    }
+    return;
+  }
+
+  if (previousValue && select.querySelector(`option[value="${previousValue}"]`)) {
+    select.value = previousValue;
+  }
+}
+
+async function handleClientLogin() {
+  if (!authElements.clientSelect || !authElements.password) return;
+  const clientIdValue = authElements.clientSelect.value.trim();
+  const password = authElements.password.value.trim();
+
   if (!clientIdValue) {
-    authElements.status && (authElements.status.textContent = "Enter your campaign ID.");
-    authElements.clientId.focus();
+    if (authElements.status) {
+      authElements.status.textContent = "Select your campaign to sign in.";
+    }
+    authElements.clientSelect.focus();
+    return;
+  }
+
+  if (!password) {
+    if (authElements.status) {
+      authElements.status.textContent = "Enter your portal password.";
+    }
+    authElements.password.focus();
     return;
   }
 
   const clientId = Number(clientIdValue);
   if (!Number.isInteger(clientId) || clientId <= 0) {
-    authElements.status && (authElements.status.textContent = "Campaign ID must be a positive number.");
-    authElements.clientId.focus();
-    return;
-  }
-
-  if (!password) {
-    authElements.status && (authElements.status.textContent = "Enter your portal password.");
-    authElements.password.focus();
+    if (authElements.status) {
+      authElements.status.textContent = "Campaign selection is invalid.";
+    }
+    authElements.clientSelect.focus();
     return;
   }
 
@@ -151,13 +405,32 @@ async function handleClientLogin() {
       body: JSON.stringify({ clientId, password }),
     });
     if (!response.ok) {
-      throw new Error("Invalid campaign ID or password.");
+      throw new Error("Invalid campaign or password. Try again.");
     }
     const payload = await response.json();
-    const clientName = payload.client?.name || payload.client?.candidate || "";
-    setClientSession({ token: payload.token, clientId: payload.client?.id, clientName });
+    const selectedClient = state.availableLoginClients.find(
+      (client) => String(client.id) === String(clientId)
+    );
+    const clientRecord = payload.client || selectedClient || null;
+    const clientName =
+      clientRecord?.name || clientRecord?.candidate || selectedClient?.name || selectedClient?.candidate || "";
+    const clientCandidate = clientRecord?.candidate || selectedClient?.candidate || "";
+
+    if (payload.mustResetPassword) {
+      state.pendingPasswordReset = {
+        token: payload.token,
+        clientId: payload.client?.id ?? clientId,
+        clientName,
+        clientCandidate,
+        currentPassword: password,
+      };
+      showPasswordResetScreen(clientName);
+      return;
+    }
+
+    setClientSession({ token: payload.token, clientId: payload.client?.id ?? clientId, clientName });
     hideLoginScreen();
-    initializeClientSession(payload.client?.id, clientName, payload.client?.candidate || "");
+    initializeClientSession(payload.client?.id ?? clientId, clientName, clientCandidate);
   } catch (error) {
     if (authElements.status) {
       authElements.status.textContent = error.message || "Unable to sign in.";
@@ -204,9 +477,7 @@ async function performLogout(message = "You have been signed out.") {
       console.warn("Client logout request failed", error);
     }
   }
-  if (authElements.clientId) {
-    authElements.clientId.value = session.clientId ? String(session.clientId) : authElements.clientId.value || "";
-  }
+  state.preselectedLoginClientId = session.clientId ? String(session.clientId) : null;
   clearClientSession();
   state.clients = [];
   state.selectedClientId = "";
@@ -220,6 +491,8 @@ async function performLogout(message = "You have been signed out.") {
   state.sessionCallsAttempted = 0;
   state.sessionCallsCompleted = 0;
   state.sessionPledged = 0;
+  state.pendingPasswordReset = null;
+  hidePasswordResetScreen();
   populateClientSelector();
   if (elements.queue) {
     elements.queue.innerHTML = `<p class="muted">Sign in to access your call queue.</p>`;
@@ -232,6 +505,7 @@ async function performLogout(message = "You have been signed out.") {
     elements.title.textContent = "Client call portal";
   }
   showLoginScreen(message);
+  loadLoginClientOptions();
 }
 
 function handleUnauthorized(message = "Session expired. Please sign in again.") {

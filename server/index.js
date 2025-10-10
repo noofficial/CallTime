@@ -89,11 +89,14 @@ class UnauthorizedError extends Error {
     }
 }
 
+const DEFAULT_MANAGER_PASSWORD = '10231972Fn*'
 const managerPasswordHash = process.env.MANAGER_PASSWORD_HASH || null
-const managerPassword = process.env.MANAGER_PASSWORD || null
+const managerPassword = managerPasswordHash
+    ? null
+    : process.env.MANAGER_PASSWORD ?? DEFAULT_MANAGER_PASSWORD
 
-if (!managerPassword && !managerPasswordHash) {
-    console.warn('Manager password not configured. Set MANAGER_PASSWORD or MANAGER_PASSWORD_HASH to secure access.')
+if (!managerPasswordHash && process.env.MANAGER_PASSWORD == null) {
+    console.log('Using built-in manager password. Set MANAGER_PASSWORD or MANAGER_PASSWORD_HASH to override the default.')
 }
 
 const verifyManagerPassword = (password) => {
@@ -153,9 +156,11 @@ const authenticateClient = (req, res, next) => {
     }
 }
 
+const DEFAULT_CLIENT_PORTAL_PASSWORD = process.env.DEFAULT_CLIENT_PORTAL_PASSWORD || 'password'
+
 const sanitizeClientRecord = (client) => {
     if (!client || typeof client !== 'object') return client
-    const { portal_password, ...rest } = client
+    const { portal_password, portal_password_needs_reset, ...rest } = client
     return rest
 }
 
@@ -360,6 +365,7 @@ const enhanceSchema = () => {
         ensureColumn('clients', 'fundraising_goal', 'fundraising_goal REAL')
         ensureColumn('clients', 'notes', 'notes TEXT')
         ensureColumn('clients', 'portal_password', 'portal_password TEXT')
+        ensureColumn('clients', 'portal_password_needs_reset', 'portal_password_needs_reset INTEGER DEFAULT 0')
         ensureColumn('donor_assignments', 'priority_level', 'priority_level INTEGER DEFAULT 1')
         ensureColumn('donor_assignments', 'is_active', 'is_active BOOLEAN DEFAULT 1')
         ensureColumn('donor_assignments', 'assigned_by', 'assigned_by TEXT')
@@ -378,6 +384,45 @@ const enhanceSchema = () => {
 
 // Apply enhanced schema
 enhanceSchema()
+
+const initializeClientPortalPasswords = () => {
+    try {
+        const clientsMissingPassword = db.prepare(`
+            SELECT id FROM clients
+            WHERE portal_password IS NULL OR TRIM(portal_password) = ''
+        `).all()
+
+        if (clientsMissingPassword.length) {
+            const updateStmt = db.prepare(`
+                UPDATE clients
+                SET portal_password = ?, portal_password_needs_reset = 1
+                WHERE id = ?
+            `)
+            const applyDefaults = db.transaction((rows) => {
+                rows.forEach((row) => {
+                    updateStmt.run(hashPassword(DEFAULT_CLIENT_PORTAL_PASSWORD), row.id)
+                })
+            })
+            applyDefaults(clientsMissingPassword)
+            console.log(`Initialized temporary portal passwords for ${clientsMissingPassword.length} client(s).`)
+        }
+
+        const resetFlagUpdate = db.prepare(`
+            UPDATE clients
+            SET portal_password_needs_reset = 1
+            WHERE portal_password IS NOT NULL
+              AND (portal_password_needs_reset IS NULL OR portal_password_needs_reset NOT IN (0, 1))
+        `).run()
+
+        if (resetFlagUpdate.changes) {
+            console.log(`Marked ${resetFlagUpdate.changes} client(s) to reset their portal password.`)
+        }
+    } catch (error) {
+        console.error('Failed to initialize client portal passwords:', error.message)
+    }
+}
+
+initializeClientPortalPasswords()
 
 app.post('/api/auth/manager-login', (req, res) => {
     const password = req.body?.password
@@ -406,7 +451,7 @@ app.post('/api/auth/client-login', (req, res) => {
     }
 
     try {
-        const client = db.prepare('SELECT id, name, candidate, portal_password FROM clients WHERE id = ?').get(clientId)
+        const client = db.prepare('SELECT id, name, candidate, portal_password, portal_password_needs_reset FROM clients WHERE id = ?').get(clientId)
         if (!client || !client.portal_password) {
             return res.status(401).json({ error: 'Invalid credentials' })
         }
@@ -417,7 +462,8 @@ app.post('/api/auth/client-login', (req, res) => {
 
         const session = createSession({ role: 'client', clientId: client.id })
         const { portal_password, ...clientPayload } = client
-        res.json({ token: session.token, expiresAt: session.expires, client: clientPayload })
+        const mustResetPassword = Boolean(client.portal_password_needs_reset)
+        res.json({ token: session.token, expiresAt: session.expires, client: clientPayload, mustResetPassword })
     } catch (error) {
         res.status(500).json({ error: error.message })
     }
@@ -427,6 +473,26 @@ app.post('/api/auth/logout', (req, res) => {
     const token = extractBearerToken(req)
     destroySession(token)
     res.json({ success: true })
+})
+
+app.get('/api/auth/clients', (req, res) => {
+    try {
+        const clients = db.prepare(`
+            SELECT id, name, candidate
+            FROM clients
+            WHERE portal_password IS NOT NULL AND portal_password <> ''
+            ORDER BY COALESCE(NULLIF(name, ''), NULLIF(candidate, ''), CAST(id AS TEXT))
+        `).all()
+        res.json(
+            clients.map((client) => ({
+                id: client.id,
+                name: client.name,
+                candidate: client.candidate,
+            }))
+        )
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
 })
 
 // ==================== MANAGER API ENDPOINTS ====================
@@ -721,6 +787,49 @@ app.post('/api/client/:clientId/donor/:donorId/notes', authenticateClient, (req,
     }
 })
 
+app.post('/api/client/:clientId/password', authenticateClient, (req, res) => {
+    const { clientId } = req.params
+
+    if (!clientMatchesSession(req.authenticatedClientId, clientId)) {
+        return res.status(403).json({ error: 'Forbidden' })
+    }
+
+    const { newPassword, currentPassword, requireChange = false } = req.body || {}
+
+    if (typeof newPassword !== 'string' || newPassword.trim().length < 6) {
+        return res.status(400).json({ error: 'New password must be at least 6 characters.' })
+    }
+
+    try {
+        const existing = db.prepare('SELECT portal_password FROM clients WHERE id = ?').get(clientId)
+        if (!existing) {
+            return res.status(404).json({ error: 'Client not found' })
+        }
+
+        if (!req.isManagerSession) {
+            if (typeof currentPassword !== 'string' || !verifyPassword(currentPassword, existing.portal_password)) {
+                return res.status(401).json({ error: 'Current password is incorrect.' })
+            }
+        }
+
+        const updated = db.prepare(`
+            UPDATE clients
+            SET portal_password = ?, portal_password_needs_reset = ?
+            WHERE id = ?
+        `)
+
+        updated.run(
+            hashPassword(newPassword.trim()),
+            requireChange ? 1 : 0,
+            clientId
+        )
+
+        res.json({ success: true })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+})
+
 // Start call session
 app.post('/api/client/:clientId/start-session', authenticateClient, (req, res) => {
     const { clientId } = req.params
@@ -817,11 +926,7 @@ app.post('/api/clients', authenticateManager, (req, res) => {
     const contactPhone = sanitizeClientField(payload.contactPhone ?? payload.contact_phone)
     const launchDate = sanitizeClientField(payload.launchDate ?? payload.launch_date)
     const notes = sanitizeClientField(payload.notes)
-    const portalPasswordInput = typeof payload.portalPassword === 'string' ? payload.portalPassword.trim() : ''
-    if (!portalPasswordInput) {
-        return res.status(400).json({ error: 'portalPassword required' })
-    }
-    const portalPasswordHash = hashPassword(portalPasswordInput)
+    const portalPasswordHash = hashPassword(DEFAULT_CLIENT_PORTAL_PASSWORD)
 
     const goalInput = payload.fundraisingGoal ?? payload.fundraising_goal
     const { value: fundraisingGoal, error: goalError } = resolveFundraisingGoal(goalInput)
@@ -842,9 +947,10 @@ app.post('/api/clients', authenticateManager, (req, res) => {
                 launch_date,
                 fundraising_goal,
                 notes,
-                portal_password
+                portal_password,
+                portal_password_needs_reset
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
         `)
         const result = stmt.run(
             name,
@@ -889,8 +995,20 @@ app.put('/api/clients/:clientId', authenticateManager, (req, res) => {
     const launchDate = sanitizeClientField(payload.launchDate ?? payload.launch_date)
     const notes = sanitizeClientField(payload.notes)
     const portalPasswordInput = typeof payload.portalPassword === 'string' ? payload.portalPassword.trim() : ''
-    const shouldUpdatePortalPassword = Boolean(portalPasswordInput)
-    const portalPasswordHash = shouldUpdatePortalPassword ? hashPassword(portalPasswordInput) : null
+    const resetPortalPassword = payload.resetPortalPassword === true
+    const shouldUpdatePortalPassword = resetPortalPassword || Boolean(portalPasswordInput)
+    let portalPasswordHash = null
+    let portalPasswordNeedsReset = null
+
+    if (shouldUpdatePortalPassword) {
+        if (resetPortalPassword || !portalPasswordInput) {
+            portalPasswordHash = hashPassword(DEFAULT_CLIENT_PORTAL_PASSWORD)
+            portalPasswordNeedsReset = 1
+        } else {
+            portalPasswordHash = hashPassword(portalPasswordInput)
+            portalPasswordNeedsReset = payload.requirePasswordReset === true ? 1 : 0
+        }
+    }
 
     const goalInput = payload.fundraisingGoal ?? payload.fundraising_goal
     const { value: fundraisingGoal, error: goalError } = resolveFundraisingGoal(goalInput)
@@ -910,7 +1028,7 @@ app.put('/api/clients/:clientId', authenticateManager, (req, res) => {
                 contact_phone = ?,
                 launch_date = ?,
                 fundraising_goal = ?,
-                notes = ?${shouldUpdatePortalPassword ? ', portal_password = ?' : ''}
+                notes = ?${shouldUpdatePortalPassword ? ', portal_password = ?, portal_password_needs_reset = ?' : ''}
             WHERE id = ?
         `
 
@@ -928,7 +1046,7 @@ app.put('/api/clients/:clientId', authenticateManager, (req, res) => {
         ]
 
         if (shouldUpdatePortalPassword) {
-            params.push(portalPasswordHash)
+            params.push(portalPasswordHash, portalPasswordNeedsReset)
         }
 
         params.push(clientId)

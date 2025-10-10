@@ -863,6 +863,18 @@ textarea.input {
   color: var(--color-text-secondary);
 }
 
+.form-help--notice {
+  margin-top: 0;
+  padding: var(--space-12);
+  border-radius: var(--radius-md);
+  background: rgba(var(--color-info-rgb, 98, 108, 113), 0.1);
+  border: 1px dashed rgba(var(--color-info-rgb, 98, 108, 113), 0.35);
+}
+
+.form-help--notice strong {
+  color: var(--color-text-primary);
+}
+
 body.modal-open {
   overflow: hidden;
 }
