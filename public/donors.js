@@ -12,6 +12,8 @@ const state = {
   selectedDonorId: null,
   searchTerm: "",
   clientFilter: "",
+  assignmentFilter: "all",
+  contactFilter: "all",
   detailDraft: null,
   detailStatus: null,
   detailStatusTimeout: null,
@@ -21,6 +23,8 @@ const state = {
 
 const elements = {
   clientFilter: document.getElementById("database-client-filter"),
+  assignmentFilter: document.getElementById("database-assignment-filter"),
+  contactFilter: document.getElementById("database-contact-filter"),
   search: document.getElementById("database-search"),
   list: document.getElementById("database-list"),
   detail: document.getElementById("database-detail"),
@@ -80,6 +84,16 @@ function bindEvents() {
   });
   elements.clientFilter?.addEventListener("change", () => {
     state.clientFilter = elements.clientFilter.value;
+    applyFilters();
+    render();
+  });
+  elements.assignmentFilter?.addEventListener("change", () => {
+    state.assignmentFilter = elements.assignmentFilter.value;
+    applyFilters();
+    render();
+  });
+  elements.contactFilter?.addEventListener("change", () => {
+    state.contactFilter = elements.contactFilter.value;
     applyFilters();
     render();
   });
@@ -202,6 +216,8 @@ function sortDonors(list = []) {
 function applyFilters() {
   const term = state.searchTerm;
   const filterId = state.clientFilter;
+  const assignmentFilter = state.assignmentFilter;
+  const contactFilter = state.contactFilter;
   state.filtered = state.donors.filter((donor) => {
     if (term) {
       const haystack = [
@@ -225,6 +241,32 @@ function applyFilters() {
     if (filterId) {
       const assigned = state.assignments.get(donor.id);
       if (!assigned || !assigned.has(filterId)) {
+        return false;
+      }
+    }
+    if (assignmentFilter && assignmentFilter !== "all") {
+      const assigned = state.assignments.get(donor.id);
+      const count = assigned ? assigned.size : 0;
+      if (assignmentFilter === "assigned" && count === 0) {
+        return false;
+      }
+      if (assignmentFilter === "unassigned" && count > 0) {
+        return false;
+      }
+    }
+    if (contactFilter && contactFilter !== "all") {
+      const hasEmail = Boolean(donor.email && donor.email.trim());
+      const hasPhone = Boolean(donor.phone && donor.phone.trim());
+      if (contactFilter === "email" && !hasEmail) {
+        return false;
+      }
+      if (contactFilter === "phone" && !hasPhone) {
+        return false;
+      }
+      if (contactFilter === "both" && (!hasEmail || !hasPhone)) {
+        return false;
+      }
+      if (contactFilter === "none" && (hasEmail || hasPhone)) {
         return false;
       }
     }
@@ -375,17 +417,20 @@ function renderDonorDetail() {
   if (!state.selectedDonorId) {
     empty.classList.remove("hidden");
     empty.removeAttribute("aria-hidden");
+    empty.removeAttribute("hidden");
     return;
   }
   const summary = state.donors.find((item) => item.id === state.selectedDonorId);
   if (!summary) {
     empty.classList.remove("hidden");
     empty.removeAttribute("aria-hidden");
+    empty.removeAttribute("hidden");
     state.selectedDonorId = null;
     return;
   }
   empty.classList.add("hidden");
   empty.setAttribute("aria-hidden", "true");
+  empty.setAttribute("hidden", "");
 
   const detail = state.donorDetails.get(summary.id);
   if (state.loadingDetailFor === summary.id && !detail) {

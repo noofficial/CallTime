@@ -38,6 +38,20 @@
             <div class="database-sidebar__controls">
               <label class="form-label" for="database-client-filter">Filter by candidate</label>
               <select class="input select" id="database-client-filter"></select>
+              <label class="form-label" for="database-assignment-filter">Focus list status</label>
+              <select class="input select" id="database-assignment-filter">
+                <option value="all">All donors</option>
+                <option value="assigned">Assigned to at least one list</option>
+                <option value="unassigned">Not assigned to any list</option>
+              </select>
+              <label class="form-label" for="database-contact-filter">Contact info</label>
+              <select class="input select" id="database-contact-filter">
+                <option value="all">All contact details</option>
+                <option value="email">Has email</option>
+                <option value="phone">Has phone</option>
+                <option value="both">Has email and phone</option>
+                <option value="none">Missing email &amp; phone</option>
+              </select>
             </div>
             <div class="database-sidebar__search">
               <label class="sr-only" for="database-search">Search donors</label>
