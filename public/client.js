@@ -323,6 +323,194 @@ function populateLoginClientOptions() {
       : primary;
     select.append(option);
   });
+}
+
+function showLoginScreen(message = "") {
+  if (authElements.status) {
+    authElements.status.textContent = message;
+  }
+  authElements.screen?.classList.remove("hidden");
+  if (elements.selector) {
+    elements.selector.disabled = true;
+  }
+  if (authElements.password) {
+    authElements.password.value = "";
+    authElements.password.focus();
+  }
+}
+
+function hideLoginScreen() {
+  authElements.screen?.classList.add("hidden");
+  if (authElements.status) {
+    authElements.status.textContent = "";
+  }
+  if (authElements.password) {
+    authElements.password.value = "";
+  }
+}
+
+async function handleClientLogin() {
+  if (!authElements.clientId || !authElements.password) return;
+  const clientIdValue = authElements.clientId.value.trim();
+  const password = authElements.password.value.trim();
+
+  if (state.preselectedLoginClientId) {
+    select.value = state.preselectedLoginClientId;
+    if (select.value !== state.preselectedLoginClientId) {
+      state.preselectedLoginClientId = null;
+    }
+    return;
+  }
+
+  if (previousValue && select.querySelector(`option[value="${previousValue}"]`)) {
+    select.value = previousValue;
+  }
+}
+
+async function handleClientLogin() {
+  if (!authElements.clientSelect || !authElements.password) return;
+  const clientIdValue = authElements.clientSelect.value.trim();
+  const password = authElements.password.value.trim();
+
+  if (!clientIdValue) {
+    if (authElements.status) {
+      authElements.status.textContent = "Select your campaign to sign in.";
+    }
+    authElements.clientSelect.focus();
+    return;
+  }
+
+  if (!password) {
+    if (authElements.status) {
+      authElements.status.textContent = "Enter your portal password.";
+    }
+    authElements.password.focus();
+    return;
+  }
+
+  const clientId = Number(clientIdValue);
+  if (!Number.isInteger(clientId) || clientId <= 0) {
+    if (authElements.status) {
+      authElements.status.textContent = "Campaign selection is invalid.";
+    }
+    authElements.clientSelect.focus();
+    return;
+  }
+
+  try {
+    authElements.form?.classList.add("auth-form--busy");
+    const response = await fetch("/api/auth/client-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientId, password }),
+    });
+    if (!response.ok) {
+      throw new Error("Invalid campaign or password. Try again.");
+    }
+    const payload = await response.json();
+    const selectedClient = state.availableLoginClients.find(
+      (client) => String(client.id) === String(clientId)
+    );
+    const clientRecord = payload.client || selectedClient || null;
+    const clientName =
+      clientRecord?.name || clientRecord?.candidate || selectedClient?.name || selectedClient?.candidate || "";
+    const clientCandidate = clientRecord?.candidate || selectedClient?.candidate || "";
+
+    if (payload.mustResetPassword) {
+      state.pendingPasswordReset = {
+        token: payload.token,
+        clientId: payload.client?.id ?? clientId,
+        clientName,
+        clientCandidate,
+        currentPassword: password,
+      };
+      showPasswordResetScreen(clientName);
+      return;
+    }
+
+    setClientSession({ token: payload.token, clientId: payload.client?.id ?? clientId, clientName });
+    hideLoginScreen();
+    initializeClientSession(payload.client?.id ?? clientId, clientName, clientCandidate);
+  } catch (error) {
+    if (authElements.status) {
+      authElements.status.textContent = error.message || "Unable to sign in.";
+    }
+    authElements.password?.focus();
+  } finally {
+    authElements.form?.classList.remove("auth-form--busy");
+  }
+}
+
+function initializeClientSession(clientId, clientName = "", clientCandidate = "") {
+  if (!clientId) return;
+  state.clients = [
+    {
+      id: String(clientId),
+      name: clientName,
+      candidate: clientCandidate,
+    },
+  ];
+  state.selectedClientId = String(clientId);
+  state.selectedClientName = clientName || clientCandidate || `Campaign ${clientId}`;
+  populateClientSelector();
+  updateClientTitle();
+  state.initialized = true;
+  loadDonorQueue();
+}
+
+function updateClientTitle() {
+  const title = state.selectedClientName || "Client call portal";
+  if (elements.title) {
+    elements.title.textContent = title;
+  }
+}
+
+async function performLogout(message = "You have been signed out.") {
+  const session = getClientSession();
+  if (session.token) {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.token}` },
+      });
+    } catch (error) {
+      console.warn("Client logout request failed", error);
+    }
+  }
+  state.preselectedLoginClientId = session.clientId ? String(session.clientId) : null;
+  clearClientSession();
+  state.clients = [];
+  state.selectedClientId = "";
+  state.selectedClientName = "";
+  state.donors = [];
+  state.filteredDonors = [];
+  state.selectedDonorId = "";
+  state.donorDetails = null;
+  state.sessionId = null;
+  state.sessionStart = null;
+  state.sessionCallsAttempted = 0;
+  state.sessionCallsCompleted = 0;
+  state.sessionPledged = 0;
+  state.pendingPasswordReset = null;
+  hidePasswordResetScreen();
+  populateClientSelector();
+  if (elements.queue) {
+    elements.queue.innerHTML = `<p class="muted">Sign in to access your call queue.</p>`;
+  }
+  hideDonorDetails();
+  if (elements.stats) {
+    elements.stats.textContent = "Sign in to access your call queue.";
+  }
+  if (elements.title) {
+    elements.title.textContent = "Client call portal";
+  }
+  showLoginScreen(message);
+  loadLoginClientOptions();
+}
+
+function handleUnauthorized(message = "Session expired. Please sign in again.") {
+  performLogout(message);
+}
 
   if (state.preselectedLoginClientId) {
     select.value = state.preselectedLoginClientId;
