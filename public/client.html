@@ -7,6 +7,21 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body class="workspace workspace--client">
+  <div class="auth-screen hidden" id="client-login-screen" role="dialog" aria-modal="true">
+    <div class="auth-panel">
+      <h1>Client portal sign in</h1>
+      <p class="muted">Enter your campaign ID and password to access your private call queue.</p>
+      <form id="client-login-form" class="auth-form">
+        <label class="form-label" for="client-login-id">Campaign ID</label>
+        <input class="form-control" id="client-login-id" type="number" min="1" autocomplete="username" required />
+        <label class="form-label" for="client-login-password">Portal password</label>
+        <input class="form-control" id="client-login-password" type="password" autocomplete="current-password" required />
+        <p class="form-help">Your campaign manager can confirm your campaign ID.</p>
+        <button class="btn btn--primary btn--block" type="submit">Sign in</button>
+        <p class="auth-status" id="client-login-status" role="alert"></p>
+      </form>
+    </div>
+  </div>
   <header class="dashboard-header">
     <div class="container">
       <div class="header-content">
@@ -17,6 +32,7 @@
         <div class="header-actions">
           <select class="form-control" id="client-selector"></select>
           <a class="btn btn--ghost" href="index.html">Switch workspace</a>
+          <button class="btn btn--ghost" type="button" id="client-logout">Log out</button>
         </div>
       </div>
     </div>

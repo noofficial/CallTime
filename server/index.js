@@ -2,6 +2,7 @@ const express = require('express')
 const cors = require('cors')
 const path = require('path')
 const fs = require('fs')
+const crypto = require('crypto')
 const Database = require('better-sqlite3')
 
 const app = express()
@@ -10,6 +11,162 @@ app.use(express.json())
 
 // Serve static files from the public directory
 app.use(express.static(path.join(__dirname, '..', 'public')))
+
+const SESSION_DURATION_MS = 1000 * 60 * 60 * 8 // 8 hours
+const sessions = new Map()
+
+const safeCompare = (input, secret) => {
+    if (typeof input !== 'string' || typeof secret !== 'string') return false
+    const inputBuffer = Buffer.from(input)
+    const secretBuffer = Buffer.from(secret)
+    if (inputBuffer.length !== secretBuffer.length) return false
+    return crypto.timingSafeEqual(inputBuffer, secretBuffer)
+}
+
+const hashPassword = (password) => {
+    const salt = crypto.randomBytes(16).toString('hex')
+    const derived = crypto.pbkdf2Sync(password, salt, 210000, 32, 'sha256').toString('hex')
+    return `${salt}:${derived}`
+}
+
+const verifyPassword = (password, stored) => {
+    if (!password || !stored || typeof stored !== 'string') return false
+    const parts = stored.split(':')
+    if (parts.length !== 2) {
+        return safeCompare(password, stored)
+    }
+
+    const [salt, expected] = parts
+    try {
+        const derived = crypto.pbkdf2Sync(password, salt, 210000, 32, 'sha256').toString('hex')
+        const derivedBuffer = Buffer.from(derived, 'hex')
+        const expectedBuffer = Buffer.from(expected, 'hex')
+        if (derivedBuffer.length !== expectedBuffer.length) {
+            return false
+        }
+        return crypto.timingSafeEqual(derivedBuffer, expectedBuffer)
+    } catch (error) {
+        return false
+    }
+}
+
+const createSession = (session) => {
+    const token = crypto.randomBytes(24).toString('hex')
+    const expires = Date.now() + SESSION_DURATION_MS
+    sessions.set(token, { ...session, expires })
+    return { token, expires }
+}
+
+const getSessionFromToken = (token) => {
+    if (!token) return null
+    const session = sessions.get(token)
+    if (!session) return null
+    if (session.expires <= Date.now()) {
+        sessions.delete(token)
+        return null
+    }
+    return session
+}
+
+const destroySession = (token) => {
+    if (token) {
+        sessions.delete(token)
+    }
+}
+
+const extractBearerToken = (req) => {
+    const header = req.headers['authorization']
+    if (!header || typeof header !== 'string') return null
+    const [scheme, value] = header.split(' ')
+    if (scheme !== 'Bearer' || !value) return null
+    return value.trim()
+}
+
+class UnauthorizedError extends Error {
+    constructor(message = 'Unauthorized') {
+        super(message)
+        this.name = 'UnauthorizedError'
+    }
+}
+
+const managerPasswordHash = process.env.MANAGER_PASSWORD_HASH || null
+const managerPassword = process.env.MANAGER_PASSWORD || null
+
+if (!managerPassword && !managerPasswordHash) {
+    console.warn('Manager password not configured. Set MANAGER_PASSWORD or MANAGER_PASSWORD_HASH to secure access.')
+}
+
+const verifyManagerPassword = (password) => {
+    if (managerPasswordHash) {
+        return verifyPassword(password, managerPasswordHash)
+    }
+    if (managerPassword) {
+        return safeCompare(password, managerPassword)
+    }
+    return false
+}
+
+const authenticateManager = (req, res, next) => {
+    try {
+        const token = extractBearerToken(req)
+        const session = getSessionFromToken(token)
+        if (!session || session.role !== 'manager') {
+            throw new UnauthorizedError()
+        }
+        req.session = session
+        req.sessionToken = token
+        next()
+    } catch (error) {
+        const status = error instanceof UnauthorizedError ? 401 : 500
+        res.status(status).json({ error: 'Unauthorized' })
+    }
+}
+
+const authenticateClient = (req, res, next) => {
+    try {
+        const token = extractBearerToken(req)
+        const session = getSessionFromToken(token)
+        if (!session) {
+            throw new UnauthorizedError()
+        }
+
+        if (session.role === 'client') {
+            req.session = session
+            req.sessionToken = token
+            req.authenticatedClientId = session.clientId
+            req.isManagerSession = false
+            return next()
+        }
+
+        if (session.role === 'manager') {
+            req.session = session
+            req.sessionToken = token
+            req.authenticatedClientId = req.params.clientId
+            req.isManagerSession = true
+            return next()
+        }
+
+        throw new UnauthorizedError()
+    } catch (error) {
+        const status = error instanceof UnauthorizedError ? 401 : 500
+        res.status(status).json({ error: 'Unauthorized' })
+    }
+}
+
+const sanitizeClientRecord = (client) => {
+    if (!client || typeof client !== 'object') return client
+    const { portal_password, ...rest } = client
+    return rest
+}
+
+const sanitizeClientCollection = (clients) => {
+    return Array.isArray(clients) ? clients.map(sanitizeClientRecord) : clients
+}
+
+const clientMatchesSession = (sessionClientId, requestedClientId) => {
+    if (sessionClientId == null || requestedClientId == null) return false
+    return String(sessionClientId) === String(requestedClientId)
+}
 
 // Database can be in either server/ or data/ directory - let's check both
 const serverDbPath = path.join(__dirname, 'campaign.db')
@@ -202,6 +359,7 @@ const enhanceSchema = () => {
         ensureColumn('clients', 'launch_date', 'launch_date TEXT')
         ensureColumn('clients', 'fundraising_goal', 'fundraising_goal REAL')
         ensureColumn('clients', 'notes', 'notes TEXT')
+        ensureColumn('clients', 'portal_password', 'portal_password TEXT')
         ensureColumn('donor_assignments', 'priority_level', 'priority_level INTEGER DEFAULT 1')
         ensureColumn('donor_assignments', 'is_active', 'is_active BOOLEAN DEFAULT 1')
         ensureColumn('donor_assignments', 'assigned_by', 'assigned_by TEXT')
@@ -221,10 +379,60 @@ const enhanceSchema = () => {
 // Apply enhanced schema
 enhanceSchema()
 
+app.post('/api/auth/manager-login', (req, res) => {
+    const password = req.body?.password
+    if (typeof password !== 'string' || !password.trim()) {
+        return res.status(400).json({ error: 'Password required' })
+    }
+
+    if (!verifyManagerPassword(password)) {
+        return res.status(401).json({ error: 'Invalid credentials' })
+    }
+
+    const session = createSession({ role: 'manager' })
+    res.json({ token: session.token, expiresAt: session.expires })
+})
+
+app.post('/api/auth/client-login', (req, res) => {
+    const clientId = req.body?.clientId
+    const password = req.body?.password
+
+    if (!clientId) {
+        return res.status(400).json({ error: 'clientId required' })
+    }
+
+    if (typeof password !== 'string' || !password.trim()) {
+        return res.status(400).json({ error: 'Password required' })
+    }
+
+    try {
+        const client = db.prepare('SELECT id, name, candidate, portal_password FROM clients WHERE id = ?').get(clientId)
+        if (!client || !client.portal_password) {
+            return res.status(401).json({ error: 'Invalid credentials' })
+        }
+
+        if (!verifyPassword(password, client.portal_password)) {
+            return res.status(401).json({ error: 'Invalid credentials' })
+        }
+
+        const session = createSession({ role: 'client', clientId: client.id })
+        const { portal_password, ...clientPayload } = client
+        res.json({ token: session.token, expiresAt: session.expires, client: clientPayload })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+})
+
+app.post('/api/auth/logout', (req, res) => {
+    const token = extractBearerToken(req)
+    destroySession(token)
+    res.json({ success: true })
+})
+
 // ==================== MANAGER API ENDPOINTS ====================
 
 // Get manager dashboard overview
-app.get('/api/manager/overview', (req, res) => {
+app.get('/api/manager/overview', authenticateManager, (req, res) => {
     try {
         const clients = db.prepare(`
             SELECT c.*, 
@@ -246,7 +454,7 @@ app.get('/api/manager/overview', (req, res) => {
         `).get()
 
         res.json({
-            clients,
+            clients: sanitizeClientCollection(clients),
             statistics: {
                 totalDonors: totalDonors.count,
                 unassignedDonors: unassignedDonors.count,
@@ -259,7 +467,7 @@ app.get('/api/manager/overview', (req, res) => {
 })
 
 // Get all donors for assignment interface
-app.get('/api/manager/donors', (req, res) => {
+app.get('/api/manager/donors', authenticateManager, (req, res) => {
     try {
         const donors = db.prepare(`
             SELECT d.*,
@@ -280,7 +488,7 @@ app.get('/api/manager/donors', (req, res) => {
 })
 
 // Assign donor to client
-app.post('/api/manager/assign-donor', (req, res) => {
+app.post('/api/manager/assign-donor', authenticateManager, (req, res) => {
     const { clientId, donorId, priority = 1 } = req.body
 
     try {
@@ -297,7 +505,7 @@ app.post('/api/manager/assign-donor', (req, res) => {
 })
 
 // Remove donor assignment
-app.delete('/api/manager/assign-donor/:clientId/:donorId', (req, res) => {
+app.delete('/api/manager/assign-donor/:clientId/:donorId', authenticateManager, (req, res) => {
     const { clientId, donorId } = req.params
 
     try {
@@ -315,7 +523,7 @@ app.delete('/api/manager/assign-donor/:clientId/:donorId', (req, res) => {
 })
 
 // Bulk assign donors to client
-app.post('/api/manager/bulk-assign', (req, res) => {
+app.post('/api/manager/bulk-assign', authenticateManager, (req, res) => {
     const { clientId, donorIds, priority = 1 } = req.body
 
     try {
@@ -340,8 +548,12 @@ app.post('/api/manager/bulk-assign', (req, res) => {
 // ==================== CLIENT API ENDPOINTS ====================
 
 // Get client's assigned donors
-app.get('/api/client/:clientId/donors', (req, res) => {
+app.get('/api/client/:clientId/donors', authenticateClient, (req, res) => {
     const { clientId } = req.params
+
+    if (!clientMatchesSession(req.authenticatedClientId, clientId)) {
+        return res.status(403).json({ error: 'Forbidden' })
+    }
 
     try {
         const donors = db.prepare(`
@@ -371,8 +583,12 @@ app.get('/api/client/:clientId/donors', (req, res) => {
 })
 
 // Get client-specific donor details with research and notes
-app.get('/api/client/:clientId/donor/:donorId', (req, res) => {
+app.get('/api/client/:clientId/donor/:donorId', authenticateClient, (req, res) => {
     const { clientId, donorId } = req.params
+
+    if (!clientMatchesSession(req.authenticatedClientId, clientId)) {
+        return res.status(403).json({ error: 'Forbidden' })
+    }
 
     try {
         // Get donor basic info
@@ -423,8 +639,12 @@ app.get('/api/client/:clientId/donor/:donorId', (req, res) => {
 })
 
 // Record call outcome
-app.post('/api/client/:clientId/call-outcome', (req, res) => {
+app.post('/api/client/:clientId/call-outcome', authenticateClient, (req, res) => {
     const { clientId } = req.params
+
+    if (!clientMatchesSession(req.authenticatedClientId, clientId)) {
+        return res.status(403).json({ error: 'Forbidden' })
+    }
     const {
         donorId,
         status,
@@ -457,8 +677,12 @@ app.post('/api/client/:clientId/call-outcome', (req, res) => {
 })
 
 // Add/update client-specific donor research
-app.post('/api/client/:clientId/donor/:donorId/research', (req, res) => {
+app.post('/api/client/:clientId/donor/:donorId/research', authenticateClient, (req, res) => {
     const { clientId, donorId } = req.params
+
+    if (!clientMatchesSession(req.authenticatedClientId, clientId)) {
+        return res.status(403).json({ error: 'Forbidden' })
+    }
     const { category, content } = req.body
 
     try {
@@ -476,8 +700,12 @@ app.post('/api/client/:clientId/donor/:donorId/research', (req, res) => {
 })
 
 // Add client-specific donor note
-app.post('/api/client/:clientId/donor/:donorId/notes', (req, res) => {
+app.post('/api/client/:clientId/donor/:donorId/notes', authenticateClient, (req, res) => {
     const { clientId, donorId } = req.params
+
+    if (!clientMatchesSession(req.authenticatedClientId, clientId)) {
+        return res.status(403).json({ error: 'Forbidden' })
+    }
     const { noteType, noteContent, isPrivate = true } = req.body
 
     try {
@@ -494,8 +722,12 @@ app.post('/api/client/:clientId/donor/:donorId/notes', (req, res) => {
 })
 
 // Start call session
-app.post('/api/client/:clientId/start-session', (req, res) => {
+app.post('/api/client/:clientId/start-session', authenticateClient, (req, res) => {
     const { clientId } = req.params
+
+    if (!clientMatchesSession(req.authenticatedClientId, clientId)) {
+        return res.status(403).json({ error: 'Forbidden' })
+    }
 
     try {
         const stmt = db.prepare(`
@@ -511,8 +743,12 @@ app.post('/api/client/:clientId/start-session', (req, res) => {
 })
 
 // End call session
-app.put('/api/client/:clientId/end-session/:sessionId', (req, res) => {
+app.put('/api/client/:clientId/end-session/:sessionId', authenticateClient, (req, res) => {
     const { clientId, sessionId } = req.params
+
+    if (!clientMatchesSession(req.authenticatedClientId, clientId)) {
+        return res.status(403).json({ error: 'Forbidden' })
+    }
     const { callsAttempted, callsCompleted, totalPledged, sessionNotes } = req.body
 
     try {
@@ -533,7 +769,7 @@ app.put('/api/client/:clientId/end-session/:sessionId', (req, res) => {
 // ==================== EXISTING ENDPOINTS (Enhanced) ====================
 
 // Get clients
-app.get('/api/clients', (req, res) => {
+app.get('/api/clients', authenticateManager, (req, res) => {
     try {
         const clients = db.prepare(`
             SELECT c.*, 
@@ -543,7 +779,7 @@ app.get('/api/clients', (req, res) => {
             GROUP BY c.id
             ORDER BY c.name
         `).all()
-        res.json(clients)
+        res.json(sanitizeClientCollection(clients))
     } catch (error) {
         res.status(500).json({ error: error.message })
     }
@@ -567,7 +803,7 @@ const resolveFundraisingGoal = (input) => {
 }
 
 // Create client
-app.post('/api/clients', (req, res) => {
+app.post('/api/clients', authenticateManager, (req, res) => {
     const payload = req.body || {}
 
     const name = sanitizeClientField(payload.name)
@@ -581,6 +817,11 @@ app.post('/api/clients', (req, res) => {
     const contactPhone = sanitizeClientField(payload.contactPhone ?? payload.contact_phone)
     const launchDate = sanitizeClientField(payload.launchDate ?? payload.launch_date)
     const notes = sanitizeClientField(payload.notes)
+    const portalPasswordInput = typeof payload.portalPassword === 'string' ? payload.portalPassword.trim() : ''
+    if (!portalPasswordInput) {
+        return res.status(400).json({ error: 'portalPassword required' })
+    }
+    const portalPasswordHash = hashPassword(portalPasswordInput)
 
     const goalInput = payload.fundraisingGoal ?? payload.fundraising_goal
     const { value: fundraisingGoal, error: goalError } = resolveFundraisingGoal(goalInput)
@@ -600,9 +841,10 @@ app.post('/api/clients', (req, res) => {
                 contact_phone,
                 launch_date,
                 fundraising_goal,
-                notes
+                notes,
+                portal_password
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
         const result = stmt.run(
             name,
@@ -614,7 +856,8 @@ app.post('/api/clients', (req, res) => {
             contactPhone,
             launchDate,
             fundraisingGoal,
-            notes
+            notes,
+            portalPasswordHash
         )
         res.json({ id: result.lastInsertRowid })
     } catch (error) {
@@ -623,7 +866,7 @@ app.post('/api/clients', (req, res) => {
 })
 
 // Update client
-app.put('/api/clients/:clientId', (req, res) => {
+app.put('/api/clients/:clientId', authenticateManager, (req, res) => {
     const clientId = req.params.clientId
     const payload = req.body || {}
 
@@ -645,6 +888,9 @@ app.put('/api/clients/:clientId', (req, res) => {
     const contactPhone = sanitizeClientField(payload.contactPhone ?? payload.contact_phone)
     const launchDate = sanitizeClientField(payload.launchDate ?? payload.launch_date)
     const notes = sanitizeClientField(payload.notes)
+    const portalPasswordInput = typeof payload.portalPassword === 'string' ? payload.portalPassword.trim() : ''
+    const shouldUpdatePortalPassword = Boolean(portalPasswordInput)
+    const portalPasswordHash = shouldUpdatePortalPassword ? hashPassword(portalPasswordInput) : null
 
     const goalInput = payload.fundraisingGoal ?? payload.fundraising_goal
     const { value: fundraisingGoal, error: goalError } = resolveFundraisingGoal(goalInput)
@@ -653,7 +899,7 @@ app.put('/api/clients/:clientId', (req, res) => {
     }
 
     try {
-        const stmt = db.prepare(`
+        const sql = `
             UPDATE clients
             SET name = ?,
                 sheet_url = ?,
@@ -664,11 +910,11 @@ app.put('/api/clients/:clientId', (req, res) => {
                 contact_phone = ?,
                 launch_date = ?,
                 fundraising_goal = ?,
-                notes = ?
+                notes = ?${shouldUpdatePortalPassword ? ', portal_password = ?' : ''}
             WHERE id = ?
-        `)
+        `
 
-        stmt.run(
+        const params = [
             name,
             sheetUrl,
             candidate,
@@ -679,8 +925,16 @@ app.put('/api/clients/:clientId', (req, res) => {
             launchDate,
             fundraisingGoal,
             notes,
-            clientId
-        )
+        ]
+
+        if (shouldUpdatePortalPassword) {
+            params.push(portalPasswordHash)
+        }
+
+        params.push(clientId)
+
+        const stmt = db.prepare(sql)
+        stmt.run(...params)
 
         res.json({ success: true })
     } catch (error) {
@@ -688,7 +942,7 @@ app.put('/api/clients/:clientId', (req, res) => {
     }
 })
 
-app.delete('/api/clients/:clientId', (req, res) => {
+app.delete('/api/clients/:clientId', authenticateManager, (req, res) => {
     const clientId = req.params.clientId
 
     try {
@@ -714,7 +968,7 @@ app.delete('/api/clients/:clientId', (req, res) => {
 })
 
 // Enhanced donors endpoint with assignment info
-app.get('/api/clients/:clientId/donors-legacy', (req, res) => {
+app.get('/api/clients/:clientId/donors-legacy', authenticateManager, (req, res) => {
     try {
         const stmt = db.prepare(`
             SELECT d.*, da.assigned_date, da.priority_level
@@ -730,7 +984,7 @@ app.get('/api/clients/:clientId/donors-legacy', (req, res) => {
 })
 
 // Create donor
-app.post('/api/clients/:clientId/donors', (req, res) => {
+app.post('/api/clients/:clientId/donors', authenticateManager, (req, res) => {
     const c = req.params.clientId
     const d = req.body || {}
     if (!d.name) return res.status(400).json({ error: 'name required' })
@@ -758,7 +1012,7 @@ app.post('/api/clients/:clientId/donors', (req, res) => {
     }
 })
 
-app.delete('/api/donors/:donorId', (req, res) => {
+app.delete('/api/donors/:donorId', authenticateManager, (req, res) => {
     const donorId = req.params.donorId
 
     try {
@@ -783,7 +1037,7 @@ app.delete('/api/donors/:donorId', (req, res) => {
     }
 })
 
-app.get('/api/donors/:donorId', (req, res) => {
+app.get('/api/donors/:donorId', authenticateManager, (req, res) => {
     const donorId = req.params.donorId
 
     try {
@@ -798,7 +1052,7 @@ app.get('/api/donors/:donorId', (req, res) => {
     }
 })
 
-app.post('/api/donors', (req, res) => {
+app.post('/api/donors', authenticateManager, (req, res) => {
     const payload = req.body || {}
     const assignedClientIds = Array.isArray(payload.assignedClientIds)
         ? payload.assignedClientIds.filter((id) => id !== undefined && id !== null)
@@ -892,7 +1146,7 @@ app.post('/api/donors', (req, res) => {
     }
 })
 
-app.put('/api/donors/:donorId', (req, res) => {
+app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
     const donorId = req.params.donorId
     const payload = req.body || {}
 
@@ -1051,13 +1305,13 @@ function getDonorDetail(donorId) {
 }
 
 // Get giving history
-app.get('/api/donors/:donorId/giving', (req, res) => {
+app.get('/api/donors/:donorId/giving', authenticateManager, (req, res) => {
     const stmt = db.prepare('SELECT * FROM giving_history WHERE donor_id = ? ORDER BY year DESC, created_at DESC')
     res.json(stmt.all(req.params.donorId))
 })
 
 // Add giving history
-app.post('/api/donors/:donorId/giving', (req, res) => {
+app.post('/api/donors/:donorId/giving', authenticateManager, (req, res) => {
     const { year, candidate, amount } = req.body || {}
     if (!year || !candidate || amount == null) return res.status(400).json({ error: 'year, candidate, amount required' })
 
@@ -1073,7 +1327,7 @@ app.post('/api/donors/:donorId/giving', (req, res) => {
     }
 })
 
-app.delete('/api/donors/:donorId/giving/:entryId', (req, res) => {
+app.delete('/api/donors/:donorId/giving/:entryId', authenticateManager, (req, res) => {
     const { donorId, entryId } = req.params
 
     try {
@@ -1090,7 +1344,7 @@ app.delete('/api/donors/:donorId/giving/:entryId', (req, res) => {
 })
 
 // Legacy interactions endpoint (now uses call_outcomes)
-app.get('/api/donors/:donorId/interactions', (req, res) => {
+app.get('/api/donors/:donorId/interactions', authenticateManager, (req, res) => {
     const { clientId } = req.query
     let stmt, params
 
@@ -1110,7 +1364,7 @@ app.get('/api/donors/:donorId/interactions', (req, res) => {
 })
 
 // Legacy interaction creation (maps to call_outcomes)
-app.post('/api/donors/:donorId/interactions', (req, res) => {
+app.post('/api/donors/:donorId/interactions', authenticateManager, (req, res) => {
     const d = req.body || {}
     const { clientId } = req.query
 
