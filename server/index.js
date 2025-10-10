@@ -777,33 +777,12 @@ app.get('/api/donors/:donorId', (req, res) => {
     const donorId = req.params.donorId
 
     try {
-        const donor = db.prepare('SELECT * FROM donors WHERE id = ?').get(donorId)
+        const donor = getDonorDetail(donorId)
         if (!donor) {
             return res.status(404).json({ error: 'Donor not found' })
         }
 
-        const history = db.prepare(`
-            SELECT id, year, candidate, amount
-            FROM giving_history
-            WHERE donor_id = ?
-            ORDER BY year DESC, created_at DESC
-        `).all(donorId)
-        const assignmentRows = db.prepare(`
-            SELECT c.id, c.name
-            FROM donor_assignments da
-            JOIN clients c ON da.client_id = c.id
-            WHERE da.donor_id = ? AND da.is_active = 1
-            ORDER BY c.name
-        `).all(donorId)
-        const assignedClientIds = assignmentRows.map((row) => row.id).join(",")
-        const assignedClientNames = assignmentRows.map((row) => row.name).join(", ")
-
-        res.json({
-            ...donor,
-            history,
-            assigned_client_ids: assignedClientIds,
-            assigned_clients: assignedClientNames,
-        })
+        res.json(donor)
     } catch (error) {
         res.status(500).json({ error: error.message })
     }
@@ -896,15 +875,8 @@ app.post('/api/donors', (req, res) => {
             historyTransaction(historyEntries)
         }
 
-        const donor = db.prepare('SELECT * FROM donors WHERE id = ?').get(donorId)
-        const history = db.prepare(`
-            SELECT id, year, candidate, amount
-            FROM giving_history
-            WHERE donor_id = ?
-            ORDER BY year DESC, created_at DESC
-        `).all(donorId)
-
-        res.status(201).json({ ...donor, history })
+        const donor = getDonorDetail(donorId)
+        res.status(201).json(donor)
     } catch (error) {
         res.status(500).json({ error: error.message })
     }
@@ -965,19 +937,90 @@ app.put('/api/donors/:donorId', (req, res) => {
             donorId
         )
 
-        const donor = db.prepare('SELECT * FROM donors WHERE id = ?').get(donorId)
-        const history = db.prepare(`
-            SELECT id, year, candidate, amount
-            FROM giving_history
-            WHERE donor_id = ?
-            ORDER BY year DESC, created_at DESC
-        `).all(donorId)
-
-        res.json({ ...donor, history })
+        const donor = getDonorDetail(donorId)
+        res.json(donor)
     } catch (error) {
         res.status(500).json({ error: error.message })
     }
 })
+
+function getDonorDetail(donorId) {
+    const donor = db.prepare('SELECT * FROM donors WHERE id = ?').get(donorId)
+    if (!donor) {
+        return null
+    }
+
+    const history = db.prepare(`
+        SELECT id, year, candidate, amount
+        FROM giving_history
+        WHERE donor_id = ?
+        ORDER BY year DESC, created_at DESC
+    `).all(donorId)
+
+    const assignmentRows = db.prepare(`
+        SELECT c.id, c.name
+        FROM donor_assignments da
+        JOIN clients c ON da.client_id = c.id
+        WHERE da.donor_id = ? AND da.is_active = 1
+        ORDER BY c.name
+    `).all(donorId)
+
+    const noteRows = db.prepare(`
+        SELECT
+            n.id,
+            n.client_id,
+            c.name AS client_name,
+            c.candidate AS client_candidate,
+            n.note_type,
+            n.note_content,
+            n.is_private,
+            n.is_important,
+            n.created_at,
+            n.updated_at
+        FROM client_donor_notes n
+        LEFT JOIN clients c ON n.client_id = c.id
+        WHERE n.donor_id = ?
+        ORDER BY n.created_at DESC
+    `).all(donorId)
+
+    const notesByClient = new Map()
+    noteRows.forEach((row) => {
+        const key = row.client_id == null ? 'unassigned' : String(row.client_id)
+        if (!notesByClient.has(key)) {
+            notesByClient.set(key, {
+                client_id: row.client_id,
+                client_name: row.client_name || row.client_candidate || 'Unknown candidate',
+                client_candidate: row.client_candidate || row.client_name || 'Unknown candidate',
+                notes: [],
+            })
+        }
+        const group = notesByClient.get(key)
+        group.notes.push({
+            id: row.id,
+            note_type: row.note_type,
+            note_content: row.note_content,
+            is_private: Boolean(row.is_private),
+            is_important: Boolean(row.is_important),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
+    })
+
+    const clientNotes = Array.from(notesByClient.values()).sort((a, b) => {
+        return (a.client_name || '').localeCompare(b.client_name || '')
+    })
+
+    const assignedClientIds = assignmentRows.map((row) => row.id).join(',')
+    const assignedClientNames = assignmentRows.map((row) => row.name).join(', ')
+
+    return {
+        ...donor,
+        history,
+        assigned_client_ids: assignedClientIds,
+        assigned_clients: assignedClientNames,
+        client_notes: clientNotes,
+    }
+}
 
 // Get giving history
 app.get('/api/donors/:donorId/giving', (req, res) => {

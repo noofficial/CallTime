@@ -331,9 +331,33 @@ function normalizeDonorDetail(detail) {
     }
     return (a.candidate || "").localeCompare(b.candidate || "");
   });
+  const candidateNotes = Array.isArray(detail.client_notes)
+    ? detail.client_notes
+        .map((group) => {
+          const notes = Array.isArray(group.notes)
+            ? group.notes.map((note) => ({
+                id: note.id != null ? String(note.id) : "",
+                type: note.note_type || "general",
+                content: note.note_content || "",
+                isPrivate: Boolean(note.is_private),
+                isImportant: Boolean(note.is_important),
+                createdAt: note.created_at || null,
+                updatedAt: note.updated_at || null,
+              }))
+            : [];
+          return {
+            clientId: group.client_id != null ? String(group.client_id) : "",
+            clientName: group.client_name || group.client_candidate || "Unknown candidate",
+            candidateLabel: group.client_candidate || group.client_name || "Unknown candidate",
+            notes,
+          };
+        })
+        .filter((group) => group.notes.length)
+    : [];
   return {
     ...summary,
     history,
+    candidateNotes,
   };
 }
 
@@ -505,6 +529,7 @@ function renderDonorDetail() {
   form.append(createIdentitySection(draft));
   form.append(createGivingSection(draft));
   form.append(createNotesSection(draft));
+  form.append(createCandidateNotesSection(detail));
   form.append(createAssignmentSection(detail));
   form.append(createHistorySection(detail));
 
@@ -683,6 +708,87 @@ function createNotesSection(draft) {
 
   section.append(createInputField("inline-notes", "notes", "Internal notes", draft.values.notes));
   section.append(createTextareaField("inline-biography", "biography", "Background", draft.values.biography, 4));
+  return section;
+}
+
+function createCandidateNotesSection(donor) {
+  const section = document.createElement("section");
+  section.className = "donor-inline-form__section donor-inline-form__section--client-notes";
+
+  const header = document.createElement("div");
+  header.className = "donor-inline-form__section-header";
+  const title = document.createElement("h3");
+  title.textContent = "Call time notes by candidate";
+  const description = document.createElement("p");
+  description.className = "muted";
+  description.textContent =
+    "Review the notes captured by each candidate during call time. Candidates can only see their own notes in their workspace.";
+  header.append(title, description);
+  section.append(header);
+
+  const groups = Array.isArray(donor.candidateNotes) ? donor.candidateNotes : [];
+  if (!groups.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "No call time notes have been recorded yet.";
+    section.append(empty);
+    return section;
+  }
+
+  groups.forEach((group) => {
+    const card = document.createElement("article");
+    card.className = "donor-client-notes";
+
+    const cardHeader = document.createElement("header");
+    cardHeader.className = "donor-client-notes__header";
+    const name = document.createElement("h4");
+    name.className = "donor-client-notes__title";
+    name.textContent = group.clientName || group.candidateLabel || "Unknown candidate";
+    cardHeader.append(name);
+    card.append(cardHeader);
+
+    const list = document.createElement("ul");
+    list.className = "donor-client-notes__list";
+    if (!group.notes.length) {
+      const empty = document.createElement("li");
+      empty.className = "donor-client-notes__empty muted";
+      empty.textContent = "No notes recorded.";
+      list.append(empty);
+    } else {
+      group.notes.forEach((note) => {
+        const item = document.createElement("li");
+        item.className = "donor-client-notes__item";
+
+        const meta = document.createElement("div");
+        meta.className = "donor-client-notes__meta";
+        const metaParts = [];
+        if (note.type) {
+          metaParts.push(formatNoteType(note.type));
+        }
+        if (note.isPrivate) {
+          metaParts.push("Private");
+        }
+        if (note.isImportant) {
+          metaParts.push("Important");
+        }
+        if (note.createdAt) {
+          metaParts.push(formatTimestamp(note.createdAt));
+        }
+        meta.textContent = metaParts.join(" • ");
+
+        const body = document.createElement("p");
+        body.className = "donor-client-notes__body";
+        body.textContent = note.content || "";
+
+        item.append(meta, body);
+        list.append(item);
+      });
+    }
+
+    card.append(list);
+    section.append(card);
+  });
+
   return section;
 }
 
@@ -1092,6 +1198,31 @@ function parseNumber(value) {
   if (!cleaned) return null;
   const numeric = Number(cleaned);
   return Number.isNaN(numeric) ? null : numeric;
+}
+
+function formatNoteType(value) {
+  if (!value) return "";
+  return value
+    .toString()
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatTimestamp(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function sortHistory(history) {

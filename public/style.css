@@ -1435,6 +1435,10 @@ body.modal-open {
   border-top: 1px solid var(--color-card-border-inner);
 }
 
+.donor-inline-form__section--client-notes {
+  gap: var(--space-20);
+}
+
 .donor-inline-form__section:first-of-type {
   border-top: none;
   padding-top: 0;
@@ -1483,6 +1487,49 @@ body.modal-open {
 .assignment-grid__item input {
   width: 16px;
   height: 16px;
+}
+
+.donor-client-notes {
+  display: grid;
+  gap: var(--space-12);
+  padding: var(--space-16);
+  border: 1px solid var(--color-card-border);
+  border-radius: var(--radius-base);
+  background: var(--color-card-muted, rgba(17, 25, 40, 0.02));
+}
+
+.donor-client-notes__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.donor-client-notes__title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+}
+
+.donor-client-notes__list {
+  display: grid;
+  gap: var(--space-12);
+}
+
+.donor-client-notes__item {
+  display: grid;
+  gap: var(--space-6);
+}
+
+.donor-client-notes__meta {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.donor-client-notes__body {
+  line-height: 1.6;
+}
+
+.donor-client-notes__empty {
+  font-size: var(--font-size-sm);
 }
 
 .history-form {
