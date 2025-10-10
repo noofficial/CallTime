@@ -27,7 +27,7 @@
           <div class="database-header__actions">
             <a class="btn btn--ghost" href="index.html">Back to workspace</a>
             <a class="btn" id="export-donors" href="#">Export JSON</a>
-            <a class="btn btn--primary" href="donor-editor.html">New donor</a>
+            <button class="btn btn--primary" type="button" id="open-donor-modal">New donor</button>
           </div>
         </div>
       </header>
@@ -38,6 +38,20 @@
             <div class="database-sidebar__controls">
               <label class="form-label" for="database-client-filter">Filter by candidate</label>
               <select class="input select" id="database-client-filter"></select>
+              <label class="form-label" for="database-assignment-filter">Focus list status</label>
+              <select class="input select" id="database-assignment-filter">
+                <option value="all">All donors</option>
+                <option value="assigned">Assigned to at least one list</option>
+                <option value="unassigned">Not assigned to any list</option>
+              </select>
+              <label class="form-label" for="database-contact-filter">Contact info</label>
+              <select class="input select" id="database-contact-filter">
+                <option value="all">All contact details</option>
+                <option value="email">Has email</option>
+                <option value="phone">Has phone</option>
+                <option value="both">Has email and phone</option>
+                <option value="none">Missing email &amp; phone</option>
+              </select>
             </div>
             <div class="database-sidebar__search">
               <label class="sr-only" for="database-search">Search donors</label>
@@ -60,6 +74,155 @@
           </section>
         </div>
       </main>
+    </div>
+
+    <div
+      class="modal hidden"
+      id="donor-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-hidden="true"
+      aria-labelledby="donor-modal-title"
+    >
+      <div class="modal__overlay" data-modal-dismiss></div>
+      <div class="modal__panel modal__panel--xl" role="document">
+        <header class="modal__header">
+          <div class="modal__header-text">
+            <p class="eyebrow">CallTime Desk</p>
+            <h2 class="modal__title" id="donor-modal-title">Create donor</h2>
+            <p class="muted">
+              Create donor records, track contribution history, and assign focus access to the right campaigns.
+            </p>
+          </div>
+          <button class="modal__close" type="button" aria-label="Close" data-modal-dismiss>&times;</button>
+        </header>
+        <div class="modal__body modal__body--scroll">
+          <form id="donor-editor-form" class="donor-editor__form" novalidate>
+            <section class="editor-section">
+              <h2>Identity</h2>
+              <div class="editor-grid">
+                <div class="form-row">
+                  <label class="form-label" for="editor-first-name">First name</label>
+                  <input class="input" id="editor-first-name" name="firstName" autocomplete="given-name" required />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="editor-last-name">Last name</label>
+                  <input class="input" id="editor-last-name" name="lastName" autocomplete="family-name" required />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="editor-email">Email</label>
+                  <input class="input" id="editor-email" name="email" type="email" autocomplete="email" />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="editor-phone">Phone</label>
+                  <input class="input" id="editor-phone" name="phone" autocomplete="tel" />
+                </div>
+              </div>
+            </section>
+
+            <section class="editor-section">
+              <h2>Professional &amp; location</h2>
+              <div class="editor-grid">
+                <div class="form-row">
+                  <label class="form-label" for="editor-company">Company</label>
+                  <input class="input" id="editor-company" name="company" />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="editor-industry">Industry</label>
+                  <input class="input" id="editor-industry" name="industry" />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="editor-city">City</label>
+                  <input class="input" id="editor-city" name="city" />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="editor-tags">Tags</label>
+                  <input class="input" id="editor-tags" name="tags" placeholder="High priority, Warm" />
+                </div>
+              </div>
+            </section>
+
+            <section class="editor-section">
+              <h2>Giving context</h2>
+              <div class="editor-grid">
+                <div class="form-row">
+                  <label class="form-label" for="editor-ask">Suggested ask</label>
+                  <input class="input" id="editor-ask" name="ask" type="number" min="0" step="25" />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="editor-last-gift">Last gift note</label>
+                  <input class="input" id="editor-last-gift" name="lastGift" placeholder="$1,000 (2023)" />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="editor-picture">Picture URL</label>
+                  <input class="input" id="editor-picture" name="pictureUrl" type="url" placeholder="https://…" />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="editor-notes">Internal notes</label>
+                  <input class="input" id="editor-notes" name="notes" />
+                </div>
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="editor-biography">Background &amp; biography</label>
+                <textarea class="input textarea" id="editor-biography" name="biography" rows="4"></textarea>
+              </div>
+            </section>
+
+            <section class="editor-section" aria-labelledby="assignment-heading">
+              <div class="editor-section__header">
+                <div>
+                  <h2 id="assignment-heading">Focus list access</h2>
+                  <p class="muted">Select the campaigns that should see this donor in their call queue.</p>
+                </div>
+                <button class="btn btn--ghost" type="button" id="select-all-clients">Select all</button>
+              </div>
+              <div id="editor-client-assignments" class="assignment-grid"></div>
+            </section>
+
+            <section class="editor-section" aria-labelledby="history-heading">
+              <div class="editor-section__header">
+                <div>
+                  <h2 id="history-heading">Contribution history</h2>
+                  <p class="muted">Log previous support to track giving capacity.</p>
+                </div>
+                <div class="history-form">
+                  <label class="sr-only" for="history-year">Election year</label>
+                  <input
+                    class="input"
+                    id="history-year"
+                    name="historyYear"
+                    type="number"
+                    min="1900"
+                    max="2100"
+                    placeholder="2024"
+                  />
+                  <label class="sr-only" for="history-candidate">Candidate</label>
+                  <input class="input" id="history-candidate" name="historyCandidate" placeholder="Candidate name" />
+                  <label class="sr-only" for="history-amount">Amount</label>
+                  <input
+                    class="input"
+                    id="history-amount"
+                    name="historyAmount"
+                    type="number"
+                    min="0"
+                    step="25"
+                    placeholder="500"
+                  />
+                  <button class="btn" type="button" id="add-history">Add</button>
+                </div>
+              </div>
+              <div id="history-list" class="history-list"></div>
+            </section>
+
+            <footer class="editor-footer">
+              <div class="editor-footer__actions">
+                <span class="muted" id="editor-status"></span>
+                <button class="btn btn--primary" type="submit">Save donor</button>
+              </div>
+            </footer>
+          </form>
+        </div>
+      </div>
     </div>
 
     <script type="module" src="donors.js"></script>
