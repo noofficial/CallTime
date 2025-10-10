@@ -309,8 +309,11 @@ async function ensureDonorDetail(donorId) {
   } catch (error) {
     console.error("Failed to load donor detail", error);
   } finally {
-    state.loadingDetailFor = null;
+    if (state.loadingDetailFor === donorId) {
+      state.loadingDetailFor = null;
+    }
   }
+  render();
 }
 
 function normalizeDonorDetail(detail) {
