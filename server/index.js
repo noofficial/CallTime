@@ -78,6 +78,12 @@ db = selectedDatabase.connection
 dbPath = selectedDatabase.path
 
 try {
+    db.pragma('foreign_keys = ON')
+} catch (error) {
+    console.warn('Failed to enable foreign key enforcement:', error.message)
+}
+
+try {
     db.pragma('journal_mode = WAL')
     console.log('Connected to database successfully')
 } catch (error) {
@@ -85,6 +91,19 @@ try {
 }
 
 // Enhanced schema for improved call time management
+const ensureColumn = (table, column, definition) => {
+    try {
+        const existing = db.prepare(`PRAGMA table_info(${table})`).all()
+        const hasColumn = existing.some((info) => info.name === column)
+        if (!hasColumn) {
+            db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`)
+            console.log(`Added ${column} column to ${table}`)
+        }
+    } catch (error) {
+        console.error(`Failed to ensure column ${table}.${column}:`, error.message)
+    }
+}
+
 const enhanceSchema = () => {
     try {
         // Add new tables for enhanced functionality
@@ -172,6 +191,9 @@ const enhanceSchema = () => {
             CREATE INDEX IF NOT EXISTS idx_donor_assignments_donor ON donor_assignments(donor_id);
             CREATE INDEX IF NOT EXISTS idx_call_sessions_client ON call_sessions(client_id);
         `)
+        ensureColumn('donors', 'first_name', 'first_name TEXT')
+        ensureColumn('donors', 'last_name', 'last_name TEXT')
+        ensureColumn('donors', 'notes', 'notes TEXT')
         console.log('Enhanced schema applied successfully')
     } catch (error) {
         console.error('Schema enhancement error:', error.message)
@@ -224,6 +246,7 @@ app.get('/api/manager/donors', (req, res) => {
         const donors = db.prepare(`
             SELECT d.*,
                    GROUP_CONCAT(c.name) as assigned_clients,
+                   GROUP_CONCAT(c.id) as assigned_client_ids,
                    COUNT(da.client_id) as assignment_count
             FROM donors d
             LEFT JOIN donor_assignments da ON d.id = da.donor_id AND da.is_active = 1
@@ -515,11 +538,36 @@ app.post('/api/clients', (req, res) => {
 
     try {
         const stmt = db.prepare(`
-            INSERT INTO clients(name, sheet_url) 
+            INSERT INTO clients(name, sheet_url)
             VALUES (?, ?)
         `)
         const result = stmt.run(name, sheet_url)
         res.json({ id: result.lastInsertRowid })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+})
+
+app.delete('/api/clients/:clientId', (req, res) => {
+    const clientId = req.params.clientId
+
+    try {
+        const existing = db.prepare('SELECT id FROM clients WHERE id = ?').get(clientId)
+        if (!existing) {
+            return res.status(404).json({ error: 'Client not found' })
+        }
+
+        const removeClient = db.transaction((id) => {
+            db.prepare('DELETE FROM donor_assignments WHERE client_id = ?').run(id)
+            db.prepare('DELETE FROM client_donor_research WHERE client_id = ?').run(id)
+            db.prepare('DELETE FROM client_donor_notes WHERE client_id = ?').run(id)
+            db.prepare('DELETE FROM call_outcomes WHERE client_id = ?').run(id)
+            db.prepare('DELETE FROM call_sessions WHERE client_id = ?').run(id)
+            db.prepare('DELETE FROM clients WHERE id = ?').run(id)
+        })
+
+        removeClient(clientId)
+        res.json({ success: true })
     } catch (error) {
         res.status(500).json({ error: error.message })
     }
@@ -570,6 +618,237 @@ app.post('/api/clients/:clientId/donors', (req, res) => {
     }
 })
 
+app.delete('/api/donors/:donorId', (req, res) => {
+    const donorId = req.params.donorId
+
+    try {
+        const existing = db.prepare('SELECT id FROM donors WHERE id = ?').get(donorId)
+        if (!existing) {
+            return res.status(404).json({ error: 'Donor not found' })
+        }
+
+        const removeDonor = db.transaction((id) => {
+            db.prepare('DELETE FROM donor_assignments WHERE donor_id = ?').run(id)
+            db.prepare('DELETE FROM client_donor_research WHERE donor_id = ?').run(id)
+            db.prepare('DELETE FROM client_donor_notes WHERE donor_id = ?').run(id)
+            db.prepare('DELETE FROM call_outcomes WHERE donor_id = ?').run(id)
+            db.prepare('DELETE FROM giving_history WHERE donor_id = ?').run(id)
+            db.prepare('DELETE FROM donors WHERE id = ?').run(id)
+        })
+
+        removeDonor(donorId)
+        res.json({ success: true })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+})
+
+app.get('/api/donors/:donorId', (req, res) => {
+    const donorId = req.params.donorId
+
+    try {
+        const donor = db.prepare('SELECT * FROM donors WHERE id = ?').get(donorId)
+        if (!donor) {
+            return res.status(404).json({ error: 'Donor not found' })
+        }
+
+        const history = db.prepare(`
+            SELECT id, year, candidate, amount
+            FROM giving_history
+            WHERE donor_id = ?
+            ORDER BY year DESC, created_at DESC
+        `).all(donorId)
+        const assignmentRows = db.prepare(`
+            SELECT c.id, c.name
+            FROM donor_assignments da
+            JOIN clients c ON da.client_id = c.id
+            WHERE da.donor_id = ? AND da.is_active = 1
+            ORDER BY c.name
+        `).all(donorId)
+        const assignedClientIds = assignmentRows.map((row) => row.id).join(",")
+        const assignedClientNames = assignmentRows.map((row) => row.name).join(", ")
+
+        res.json({
+            ...donor,
+            history,
+            assigned_client_ids: assignedClientIds,
+            assigned_clients: assignedClientNames,
+        })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+})
+
+app.post('/api/donors', (req, res) => {
+    const payload = req.body || {}
+    const assignedClientIds = Array.isArray(payload.assignedClientIds)
+        ? payload.assignedClientIds.filter((id) => id !== undefined && id !== null)
+        : []
+
+    if (!payload.firstName && !payload.lastName && !payload.name) {
+        return res.status(400).json({ error: 'Donor name is required' })
+    }
+
+    if (!assignedClientIds.length) {
+        return res.status(400).json({ error: 'At least one client assignment is required' })
+    }
+
+    const numericClientIds = assignedClientIds
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0)
+    if (!numericClientIds.length) {
+        return res.status(400).json({ error: 'Assigned clients are invalid' })
+    }
+
+    const ownerClientId = numericClientIds[0]
+    const name = payload.name || `${payload.firstName || ''} ${payload.lastName || ''}`.trim()
+
+    try {
+        const stmt = db.prepare(`
+            INSERT INTO donors (
+                client_id, name, first_name, last_name, phone, email, city,
+                employer, occupation, tags, suggested_ask, last_gift_note,
+                notes, bio, photo_url
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+
+        const result = stmt.run(
+            ownerClientId,
+            name,
+            payload.firstName || null,
+            payload.lastName || null,
+            payload.phone || null,
+            payload.email || null,
+            payload.city || null,
+            payload.company || null,
+            payload.industry || null,
+            payload.tags || null,
+            payload.ask !== undefined && payload.ask !== null && payload.ask !== '' ? Number(payload.ask) : null,
+            payload.lastGift || null,
+            payload.notes || null,
+            payload.biography || null,
+            payload.pictureUrl || null
+        )
+
+        const donorId = result.lastInsertRowid
+
+        const assignStmt = db.prepare(`
+            INSERT OR REPLACE INTO donor_assignments (client_id, donor_id, assigned_by, is_active)
+            VALUES (?, ?, ?, 1)
+        `)
+        const assignTransaction = db.transaction((clientIds) => {
+            clientIds.forEach((clientId) => {
+                assignStmt.run(clientId, donorId, payload.createdBy || 'donor-editor')
+            })
+        })
+        assignTransaction(numericClientIds)
+
+        const historyEntries = Array.isArray(payload.history) ? payload.history : []
+        if (historyEntries.length) {
+            const historyStmt = db.prepare(`
+                INSERT INTO giving_history (donor_id, year, candidate, amount)
+                VALUES (?, ?, ?, ?)
+            `)
+            const historyTransaction = db.transaction((entries) => {
+                entries.forEach((entry) => {
+                    if (!entry) return
+                    const year = Number(entry.year)
+                    const candidate = entry.candidate ? String(entry.candidate) : ''
+                    const amount = entry.amount === null || entry.amount === undefined || entry.amount === ''
+                        ? null
+                        : Number(entry.amount)
+                    if (!candidate || Number.isNaN(year) || amount === null || Number.isNaN(amount)) {
+                        return
+                    }
+                    historyStmt.run(donorId, year, candidate, amount)
+                })
+            })
+            historyTransaction(historyEntries)
+        }
+
+        const donor = db.prepare('SELECT * FROM donors WHERE id = ?').get(donorId)
+        const history = db.prepare(`
+            SELECT id, year, candidate, amount
+            FROM giving_history
+            WHERE donor_id = ?
+            ORDER BY year DESC, created_at DESC
+        `).all(donorId)
+
+        res.status(201).json({ ...donor, history })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+})
+
+app.put('/api/donors/:donorId', (req, res) => {
+    const donorId = req.params.donorId
+    const payload = req.body || {}
+
+    try {
+        const existing = db.prepare('SELECT * FROM donors WHERE id = ?').get(donorId)
+        if (!existing) {
+            return res.status(404).json({ error: 'Donor not found' })
+        }
+
+        const firstName = payload.firstName ?? existing.first_name
+        const lastName = payload.lastName ?? existing.last_name
+        const name = payload.name || `${firstName || ''} ${lastName || ''}`.trim() || existing.name
+        const suggestedAsk =
+            payload.ask === null || payload.ask === undefined || payload.ask === ''
+                ? null
+                : Number(payload.ask)
+
+        const stmt = db.prepare(`
+            UPDATE donors
+            SET name = ?,
+                first_name = ?,
+                last_name = ?,
+                phone = ?,
+                email = ?,
+                city = ?,
+                employer = ?,
+                occupation = ?,
+                tags = ?,
+                suggested_ask = ?,
+                last_gift_note = ?,
+                notes = ?,
+                bio = ?,
+                photo_url = ?
+            WHERE id = ?
+        `)
+
+        stmt.run(
+            name,
+            firstName || null,
+            lastName || null,
+            payload.phone ?? existing.phone,
+            payload.email ?? existing.email,
+            payload.city ?? existing.city,
+            payload.company ?? existing.employer,
+            payload.industry ?? existing.occupation,
+            payload.tags ?? existing.tags,
+            suggestedAsk,
+            payload.lastGift ?? existing.last_gift_note,
+            payload.notes ?? existing.notes,
+            payload.biography ?? existing.bio,
+            payload.pictureUrl ?? existing.photo_url,
+            donorId
+        )
+
+        const donor = db.prepare('SELECT * FROM donors WHERE id = ?').get(donorId)
+        const history = db.prepare(`
+            SELECT id, year, candidate, amount
+            FROM giving_history
+            WHERE donor_id = ?
+            ORDER BY year DESC, created_at DESC
+        `).all(donorId)
+
+        res.json({ ...donor, history })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+})
+
 // Get giving history
 app.get('/api/donors/:donorId/giving', (req, res) => {
     const stmt = db.prepare('SELECT * FROM giving_history WHERE donor_id = ? ORDER BY year DESC, created_at DESC')
@@ -588,6 +867,22 @@ app.post('/api/donors/:donorId/giving', (req, res) => {
         `)
         const result = stmt.run(req.params.donorId, year, candidate, amount)
         res.json({ id: result.lastInsertRowid })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+})
+
+app.delete('/api/donors/:donorId/giving/:entryId', (req, res) => {
+    const { donorId, entryId } = req.params
+
+    try {
+        const existing = db.prepare('SELECT id FROM giving_history WHERE id = ? AND donor_id = ?').get(entryId, donorId)
+        if (!existing) {
+            return res.status(404).json({ error: 'Contribution not found' })
+        }
+
+        db.prepare('DELETE FROM giving_history WHERE id = ?').run(entryId)
+        res.json({ success: true })
     } catch (error) {
         res.status(500).json({ error: error.message })
     }

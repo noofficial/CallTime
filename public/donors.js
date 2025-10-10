@@ -1,7 +1,3 @@
-import { CallTimeDatabase, DATABASE_KEY } from "./database.js";
-
-const db = new CallTimeDatabase();
-
 const state = {
   donors: [],
   filtered: [],
@@ -13,6 +9,8 @@ const state = {
   detailDraft: null,
   detailStatus: null,
   detailStatusTimeout: null,
+  donorDetails: new Map(),
+  loadingDetailFor: null,
 };
 
 const elements = {
@@ -26,13 +24,13 @@ const elements = {
 
 init();
 
-function init() {
+async function init() {
   bindEvents();
-  loadData();
+  await loadData();
   const params = new URLSearchParams(window.location.search);
   const initialDonor = params.get("donor");
   if (initialDonor) {
-    selectDonor(initialDonor);
+    await selectDonor(initialDonor);
   }
   render();
 }
@@ -48,50 +46,92 @@ function bindEvents() {
     applyFilters();
     render();
   });
-  elements.list?.addEventListener("click", (event) => {
+  elements.list?.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-donor-id]");
     if (!button) return;
     const donorId = button.getAttribute("data-donor-id");
-    selectDonor(donorId);
+    await selectDonor(donorId);
     render();
   });
-  elements.export?.addEventListener("click", (event) => {
+  elements.export?.addEventListener("click", async (event) => {
     event.preventDefault();
-    exportDonors();
+    await exportDonors();
   });
-  window.addEventListener("storage", handleStorageSync);
 }
 
-function handleStorageSync(event) {
-  if (event.key && event.key !== DATABASE_KEY) return;
-  loadData();
-  applyFilters();
-  render();
-}
-
-function loadData() {
-  state.clients = db.getClients();
-  state.donors = sortDonors(db.getAllDonors());
-  state.assignments = buildAssignmentMap(db.getAssignments());
-  state.detailDraft = null;
-  state.detailStatus = null;
-  if (state.detailStatusTimeout) {
-    clearTimeout(state.detailStatusTimeout);
-    state.detailStatusTimeout = null;
+async function loadData() {
+  try {
+    const [overview, donorList] = await Promise.all([
+      fetchJson("/api/manager/overview"),
+      fetchJson("/api/manager/donors"),
+    ]);
+    state.clients = Array.isArray(overview?.clients)
+      ? overview.clients.map(normalizeClient)
+      : [];
+    state.donors = Array.isArray(donorList)
+      ? sortDonors(donorList.map(normalizeDonorSummary))
+      : [];
+    state.assignments = buildAssignmentMap(state.donors);
+    renderClientFilter();
+    applyFilters();
+  } catch (error) {
+    console.error("Failed to load donors", error);
   }
-  renderClientFilter();
-  applyFilters();
 }
 
-function buildAssignmentMap(assignments = {}) {
+function normalizeClient(client) {
+  if (!client) return null;
+  const id = client.id != null ? String(client.id) : "";
+  return {
+    id,
+    label: client.name || client.label || client.candidate || "Unnamed candidate",
+    candidate: client.name || client.candidate || client.label || "Unnamed candidate",
+  };
+}
+
+function normalizeDonorSummary(donor) {
+  if (!donor) return null;
+  const id = donor.id != null ? String(donor.id) : "";
+  const firstName = donor.first_name || "";
+  const lastName = donor.last_name || "";
+  const name = donor.name || `${firstName} ${lastName}`.trim();
+  const askValue =
+    donor.suggested_ask === null || donor.suggested_ask === undefined
+      ? null
+      : Number(donor.suggested_ask);
+  return {
+    id,
+    name: name || "New donor",
+    firstName,
+    lastName,
+    email: donor.email || "",
+    phone: donor.phone || "",
+    city: donor.city || "",
+    company: donor.employer || "",
+    industry: donor.occupation || "",
+    tags: donor.tags || "",
+    ask: Number.isNaN(askValue) ? null : askValue,
+    lastGift: donor.last_gift_note || "",
+    notes: donor.notes || "",
+    biography: donor.bio || "",
+    pictureUrl: donor.photo_url || "",
+    assignedClientIds: parseAssignedIds(donor.assigned_client_ids),
+    assignedLabel: donor.assigned_clients || "",
+  };
+}
+
+function parseAssignedIds(raw) {
+  if (!raw) return [];
+  return String(raw)
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function buildAssignmentMap(donors) {
   const map = new Map();
-  Object.entries(assignments).forEach(([clientId, donorIds]) => {
-    donorIds.forEach((donorId) => {
-      if (!map.has(donorId)) {
-        map.set(donorId, new Set());
-      }
-      map.get(donorId).add(clientId);
-    });
+  donors.forEach((donor) => {
+    map.set(donor.id, new Set(donor.assignedClientIds || []));
   });
   return map;
 }
@@ -100,7 +140,8 @@ function sortDonors(list = []) {
   return [...list].sort(
     (a, b) =>
       (a.lastName || "").localeCompare(b.lastName || "") ||
-      (a.firstName || "").localeCompare(b.firstName || ""),
+      (a.firstName || "").localeCompare(b.firstName || "") ||
+      (a.name || "").localeCompare(b.name || ""),
   );
 }
 
@@ -147,13 +188,57 @@ function applyFilters() {
   }
 }
 
-function selectDonor(donorId) {
+async function selectDonor(donorId) {
   if (!donorId) {
     state.selectedDonorId = null;
     return;
   }
   const exists = state.donors.some((donor) => donor.id === donorId);
   state.selectedDonorId = exists ? donorId : null;
+  if (state.selectedDonorId) {
+    await ensureDonorDetail(state.selectedDonorId);
+  }
+}
+
+async function ensureDonorDetail(donorId) {
+  if (!donorId) return;
+  if (state.donorDetails.has(donorId)) return;
+  state.loadingDetailFor = donorId;
+  render();
+  try {
+    const detail = await fetchJson(`/api/donors/${donorId}`);
+    if (!detail) return;
+    const normalized = normalizeDonorDetail(detail);
+    state.donorDetails.set(donorId, normalized);
+  } catch (error) {
+    console.error("Failed to load donor detail", error);
+  } finally {
+    state.loadingDetailFor = null;
+  }
+}
+
+function normalizeDonorDetail(detail) {
+  const summary = normalizeDonorSummary(detail);
+  const history = Array.isArray(detail.history)
+    ? detail.history.map((entry) => ({
+        id: String(entry.id),
+        year: entry.year,
+        candidate: entry.candidate,
+        amount: entry.amount,
+      }))
+    : [];
+  history.sort((a, b) => {
+    const yearA = a.year || 0;
+    const yearB = b.year || 0;
+    if (yearA !== yearB) {
+      return yearB - yearA;
+    }
+    return (a.candidate || "").localeCompare(b.candidate || "");
+  });
+  return {
+    ...summary,
+    history,
+  };
 }
 
 function render() {
@@ -171,12 +256,13 @@ function renderClientFilter() {
   allOption.textContent = "All candidates";
   select.append(allOption);
   state.clients.forEach((client) => {
+    if (!client) return;
     const option = document.createElement("option");
     option.value = client.id;
     option.textContent = client.label || client.candidate || "Unnamed candidate";
     select.append(option);
   });
-  if (previous && state.clients.some((client) => client.id === previous)) {
+  if (previous && state.clients.some((client) => client?.id === previous)) {
     select.value = previous;
     state.clientFilter = previous;
   } else {
@@ -236,16 +322,32 @@ function renderDonorDetail() {
     empty.classList.remove("hidden");
     return;
   }
-  const donor = state.donors.find((item) => item.id === state.selectedDonorId);
-  if (!donor) {
+  const summary = state.donors.find((item) => item.id === state.selectedDonorId);
+  if (!summary) {
     empty.classList.remove("hidden");
     state.selectedDonorId = null;
     return;
   }
   empty.classList.add("hidden");
 
-  if (!state.detailDraft || state.detailDraft.id !== donor.id) {
-    state.detailDraft = createDraftFromDonor(donor);
+  const detail = state.donorDetails.get(summary.id);
+  if (state.loadingDetailFor === summary.id && !detail) {
+    const loading = document.createElement("article");
+    loading.className = "donor-profile";
+    loading.innerHTML = `<p class="muted">Loading donor details…</p>`;
+    container.append(loading);
+    return;
+  }
+  if (!detail) {
+    const missing = document.createElement("article");
+    missing.className = "donor-profile";
+    missing.innerHTML = `<p class="muted">Unable to load this donor right now.</p>`;
+    container.append(missing);
+    return;
+  }
+
+  if (!state.detailDraft || state.detailDraft.id !== summary.id) {
+    state.detailDraft = createDraftFromDonor(detail);
   }
 
   const draft = state.detailDraft;
@@ -263,7 +365,7 @@ function renderDonorDetail() {
   identity.className = "donor-inline-form__identity";
   const nameHeading = document.createElement("h2");
   nameHeading.setAttribute("data-display-name", "");
-  nameHeading.textContent = buildDraftDisplayName(draft.values, donor);
+  nameHeading.textContent = buildDraftDisplayName(draft.values, detail);
   identity.append(nameHeading);
 
   const meta = document.createElement("p");
@@ -279,14 +381,21 @@ function renderDonorDetail() {
   const status = document.createElement("span");
   status.className = "muted";
   status.setAttribute("data-status", "");
-  if (state.detailStatus && state.detailStatus.donorId === donor.id) {
+  if (state.detailStatus && state.detailStatus.donorId === detail.id) {
     status.textContent = state.detailStatus.message;
   }
+  const deleteButton = document.createElement("button");
+  deleteButton.type = "button";
+  deleteButton.className = "btn btn--danger";
+  deleteButton.textContent = "Delete donor";
+  deleteButton.addEventListener("click", () => {
+    void handleDeleteDonor(detail.id);
+  });
   const saveButton = document.createElement("button");
   saveButton.type = "submit";
   saveButton.className = "btn btn--primary";
   saveButton.textContent = "Save changes";
-  actions.append(status, saveButton);
+  actions.append(status, deleteButton, saveButton);
 
   header.append(identity, actions);
   form.append(header);
@@ -294,14 +403,24 @@ function renderDonorDetail() {
   form.append(createIdentitySection(draft));
   form.append(createGivingSection(draft));
   form.append(createNotesSection(draft));
-  form.append(createAssignmentSection(donor));
-  form.append(createHistorySection(donor));
+  form.append(createAssignmentSection(detail));
+  form.append(createHistorySection(detail));
 
   profile.append(form);
   container.append(profile);
 
-  form.addEventListener("input", (event) => handleInlineInput(event, donor, nameHeading, meta));
-  form.addEventListener("submit", (event) => handleInlineSubmit(event, donor));
+  form.addEventListener("input", (event) => handleInlineInput(event, detail, nameHeading, meta));
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!(event.currentTarget instanceof HTMLFormElement)) {
+      void handleInlineSubmit(detail);
+      return;
+    }
+    if (!event.currentTarget.reportValidity()) {
+      return;
+    }
+    void handleInlineSubmit(detail);
+  });
 }
 
 function createDraftFromDonor(donor) {
@@ -330,7 +449,7 @@ function createDraftFromDonor(donor) {
           ? ""
           : String(donor.ask),
       lastGift: donor.lastGift || "",
-      notes: donor.notes || donor.donorNotes || "",
+      notes: donor.notes || "",
       biography: donor.biography || "",
       pictureUrl: donor.pictureUrl || "",
     },
@@ -483,16 +602,10 @@ function handleInlineInput(event, donor, nameHeading, metaElement) {
   }
 }
 
-function handleInlineSubmit(event, donor) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  if (!(form instanceof HTMLFormElement) || !form.reportValidity()) {
-    return;
-  }
+async function handleInlineSubmit(donor) {
   if (!state.detailDraft || state.detailDraft.id !== donor.id) {
     return;
   }
-
   const values = state.detailDraft.values;
   const payload = {
     firstName: values.firstName.trim(),
@@ -505,29 +618,39 @@ function handleInlineSubmit(event, donor) {
     tags: values.tags.trim(),
     ask: parseNumber(values.ask),
     lastGift: values.lastGift.trim(),
-    donorNotes: values.notes.trim(),
+    notes: values.notes.trim(),
     biography: values.biography.trim(),
     pictureUrl: values.pictureUrl.trim(),
   };
 
-  const updated = db.updateDonor(donor.id, payload);
-  state.detailDraft = createDraftFromDonor(updated);
-  state.detailStatus = { donorId: donor.id, message: "Saved just now" };
-  if (state.detailStatusTimeout) {
-    clearTimeout(state.detailStatusTimeout);
-  }
-  state.detailStatusTimeout = window.setTimeout(() => {
-    if (state.detailStatus && state.detailStatus.donorId === donor.id) {
-      state.detailStatus = null;
-      const statusNode = elements.detail?.querySelector("[data-status]");
-      if (statusNode) {
-        statusNode.textContent = "";
-      }
+  try {
+    const updated = await fetchJson(`/api/donors/${donor.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!updated) return;
+    const normalized = normalizeDonorDetail(updated);
+    state.donorDetails.set(donor.id, normalized);
+    state.detailDraft = createDraftFromDonor(normalized);
+    state.detailStatus = { donorId: donor.id, message: "Saved just now" };
+    if (state.detailStatusTimeout) {
+      clearTimeout(state.detailStatusTimeout);
     }
-    state.detailStatusTimeout = null;
-  }, 3000);
-
-  refreshData({ donorId: donor.id, preserveDraft: true });
+    state.detailStatusTimeout = window.setTimeout(() => {
+      if (state.detailStatus && state.detailStatus.donorId === donor.id) {
+        state.detailStatus = null;
+        const statusNode = elements.detail?.querySelector("[data-status]");
+        if (statusNode) {
+          statusNode.textContent = "";
+        }
+      }
+      state.detailStatusTimeout = null;
+    }, 3000);
+    await refreshData({ donorId: donor.id, preserveDraft: true, skipClients: true });
+  } catch (error) {
+    console.error("Failed to update donor", error);
+  }
 }
 
 function createAssignmentSection(donor) {
@@ -578,7 +701,7 @@ function createAssignmentSection(donor) {
       input.value = client.id;
       input.checked = assigned.has(client.id);
       input.addEventListener("change", (event) => {
-        toggleAssignment(donor.id, client.id, event.target.checked);
+        void toggleAssignment(donor.id, client.id, event.target.checked);
       });
       const name = document.createElement("span");
       name.textContent = client.label || client.candidate || "Unnamed candidate";
@@ -590,15 +713,21 @@ function createAssignmentSection(donor) {
   return section;
 }
 
-function toggleAssignment(donorId, clientId, shouldAssign) {
-  const current = new Set(db.getClientsForDonor(donorId));
-  if (shouldAssign) {
-    current.add(clientId);
-  } else {
-    current.delete(clientId);
+async function toggleAssignment(donorId, clientId, shouldAssign) {
+  try {
+    if (shouldAssign) {
+      await fetchJson("/api/manager/assign-donor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId, donorId }),
+      });
+    } else {
+      await fetchJson(`/api/manager/assign-donor/${clientId}/${donorId}`, { method: "DELETE" });
+    }
+    await refreshData({ donorId, preserveDraft: true });
+  } catch (error) {
+    console.error("Failed to update assignment", error);
   }
-  db.setDonorClients(donorId, Array.from(current));
-  refreshData({ donorId, preserveDraft: true });
 }
 
 function createHistorySection(donor) {
@@ -642,7 +771,7 @@ function createHistorySection(donor) {
   addButton.className = "btn";
   addButton.textContent = "Add";
   addButton.addEventListener("click", () => {
-    addHistoryEntry(donor.id, yearInput, candidateInput, amountInput);
+    void addHistoryEntry(donor.id, yearInput, candidateInput, amountInput);
   });
 
   formRow.append(yearInput, candidateInput, amountInput, addButton);
@@ -655,7 +784,7 @@ function createHistorySection(donor) {
     const button = event.target.closest("[data-remove-history]");
     if (!button) return;
     const entryId = button.getAttribute("data-remove-history");
-    removeHistoryEntry(donor.id, entryId);
+    void removeHistoryEntry(donor.id, entryId);
   });
   section.append(list);
   return section;
@@ -703,48 +832,114 @@ function renderHistoryItems(container, history = []) {
   container.append(table);
 }
 
-function addHistoryEntry(donorId, yearInput, candidateInput, amountInput) {
+async function addHistoryEntry(donorId, yearInput, candidateInput, amountInput) {
   const yearValue = parseInt(yearInput.value, 10);
   const candidate = candidateInput.value.trim();
   const amountValue = parseNumber(amountInput.value);
   if (!candidate && Number.isNaN(yearValue) && amountValue === null) {
     return;
   }
-  const entry = db.addContribution(donorId, {
-    year: Number.isNaN(yearValue) ? undefined : yearValue,
-    candidate,
-    amount: amountValue,
-  });
-  if (state.detailDraft && state.detailDraft.id === donorId) {
-    state.detailDraft.history.push(entry);
-    sortHistory(state.detailDraft.history);
+  try {
+    const payload = {
+      year: Number.isNaN(yearValue) ? undefined : yearValue,
+      candidate,
+      amount: amountValue,
+    };
+    await fetchJson(`/api/donors/${donorId}/giving`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    yearInput.value = "";
+    candidateInput.value = "";
+    amountInput.value = "";
+    await refreshData({ donorId, preserveDraft: true, skipClients: true });
+  } catch (error) {
+    console.error("Failed to add contribution", error);
   }
-  yearInput.value = "";
-  candidateInput.value = "";
-  amountInput.value = "";
-  refreshData({ donorId, preserveDraft: true });
 }
 
-function removeHistoryEntry(donorId, entryId) {
+async function removeHistoryEntry(donorId, entryId) {
   if (!entryId) return;
-  db.removeContribution(donorId, entryId);
-  if (state.detailDraft && state.detailDraft.id === donorId) {
-    state.detailDraft.history = state.detailDraft.history.filter((item) => item.id !== entryId);
+  try {
+    await fetchJson(`/api/donors/${donorId}/giving/${entryId}`, { method: "DELETE" });
+    await refreshData({ donorId, preserveDraft: true, skipClients: true });
+  } catch (error) {
+    console.error("Failed to remove contribution", error);
   }
-  refreshData({ donorId, preserveDraft: true });
 }
 
-function refreshData({ donorId = state.selectedDonorId, preserveDraft = false } = {}) {
-  const draft = preserveDraft && state.detailDraft && state.detailDraft.id === donorId ? state.detailDraft : null;
-  state.donors = sortDonors(db.getAllDonors());
-  state.assignments = buildAssignmentMap(db.getAssignments());
-  applyFilters();
-  const isActiveDonor = Boolean(donorId && state.filtered.some((item) => item.id === donorId));
-  if (isActiveDonor) {
-    state.selectedDonorId = donorId;
+async function handleDeleteDonor(donorId) {
+  const donor = state.donors.find((item) => item.id === donorId);
+  const name = donor?.name || `${donor?.firstName || ""} ${donor?.lastName || ""}`.trim() || "this donor";
+  const confirmed = window.confirm(
+    `Delete ${name}? This will remove the donor and all related history. This action cannot be undone.`,
+  );
+  if (!confirmed) return;
+  try {
+    await fetchJson(`/api/donors/${donorId}`, { method: "DELETE" });
+    state.donorDetails.delete(donorId);
+    await refreshData({ donorId: null, preserveDraft: false });
+  } catch (error) {
+    console.error("Failed to delete donor", error);
   }
-  state.detailDraft = preserveDraft && draft && isActiveDonor ? draft : null;
-  render();
+}
+
+async function refreshData({ donorId = state.selectedDonorId, preserveDraft = false, skipClients = false } = {}) {
+  try {
+    const donors = await fetchJson("/api/manager/donors");
+    if (Array.isArray(donors)) {
+      const normalized = sortDonors(donors.map(normalizeDonorSummary));
+      state.donors = normalized;
+      state.assignments = buildAssignmentMap(state.donors);
+    }
+    if (!skipClients) {
+      const overview = await fetchJson("/api/manager/overview");
+      if (overview && Array.isArray(overview.clients)) {
+        state.clients = overview.clients.map(normalizeClient).filter(Boolean);
+      }
+    }
+    applyFilters();
+    const isActiveDonor = Boolean(donorId && state.filtered.some((item) => item.id === donorId));
+    if (isActiveDonor) {
+      state.selectedDonorId = donorId;
+      await ensureDonorDetail(donorId);
+      const detail = state.donorDetails.get(donorId);
+      if (detail) {
+        if (preserveDraft && state.detailDraft && state.detailDraft.id === donorId) {
+          state.detailDraft = {
+            id: donorId,
+            values: { ...state.detailDraft.values },
+            history: detail.history ? detail.history.map((entry) => ({ ...entry })) : [],
+          };
+        } else {
+          state.detailDraft = createDraftFromDonor(detail);
+        }
+      }
+    } else {
+      state.selectedDonorId = state.filtered.length ? state.filtered[0].id : null;
+      if (state.selectedDonorId) {
+        await ensureDonorDetail(state.selectedDonorId);
+        const detail = state.donorDetails.get(state.selectedDonorId);
+        if (detail) {
+          if (preserveDraft && state.detailDraft && state.detailDraft.id === state.selectedDonorId) {
+            state.detailDraft = {
+              id: state.selectedDonorId,
+              values: { ...state.detailDraft.values },
+              history: detail.history ? detail.history.map((entry) => ({ ...entry })) : [],
+            };
+          } else {
+            state.detailDraft = createDraftFromDonor(detail);
+          }
+        }
+      } else {
+        state.detailDraft = null;
+      }
+    }
+    render();
+  } catch (error) {
+    console.error("Failed to refresh data", error);
+  }
 }
 
 function parseNumber(value) {
@@ -766,19 +961,31 @@ function sortHistory(history) {
   });
 }
 
-function exportDonors() {
-  const donors = db.getAllDonors();
-  const blob = new Blob([JSON.stringify(donors, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "calltime-complete-donor-database.json";
-  document.body.append(link);
-  link.click();
-  requestAnimationFrame(() => {
-    URL.revokeObjectURL(url);
-    link.remove();
-  });
+async function exportDonors() {
+  try {
+    const donors = await fetchJson("/api/manager/donors");
+    const blob = new Blob([JSON.stringify(donors, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "calltime-complete-donor-database.json";
+    document.body.append(link);
+    link.click();
+    requestAnimationFrame(() => {
+      URL.revokeObjectURL(url);
+      link.remove();
+    });
+  } catch (error) {
+    console.error("Failed to export donors", error);
+  }
+}
+
+async function fetchJson(url, options) {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+  return response.status === 204 ? null : response.json();
 }
 
 function escapeHtml(value) {
