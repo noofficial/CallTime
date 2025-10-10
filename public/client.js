@@ -323,6 +323,36 @@ function populateLoginClientOptions() {
       : primary;
     select.append(option);
   });
+}
+
+function showLoginScreen(message = "") {
+  if (authElements.status) {
+    authElements.status.textContent = message;
+  }
+  authElements.screen?.classList.remove("hidden");
+  if (elements.selector) {
+    elements.selector.disabled = true;
+  }
+  if (authElements.password) {
+    authElements.password.value = "";
+    authElements.password.focus();
+  }
+}
+
+function hideLoginScreen() {
+  authElements.screen?.classList.add("hidden");
+  if (authElements.status) {
+    authElements.status.textContent = "";
+  }
+  if (authElements.password) {
+    authElements.password.value = "";
+  }
+}
+
+async function handleClientLogin() {
+  if (!authElements.clientId || !authElements.password) return;
+  const clientIdValue = authElements.clientId.value.trim();
+  const password = authElements.password.value.trim();
 
   if (state.preselectedLoginClientId) {
     select.value = state.preselectedLoginClientId;
