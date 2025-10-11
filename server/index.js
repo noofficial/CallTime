@@ -137,7 +137,7 @@ const authenticateClient = (req, res, next) => {
             req.session = session
             req.sessionToken = token
             req.authenticatedClientId = session.clientId
-            req.isManagerSession = false
+            req.isManagerSession = Boolean(session.impersonatedByManager)
             return next()
         }
 
@@ -456,13 +456,20 @@ app.post('/api/auth/client-login', (req, res) => {
             return res.status(401).json({ error: 'Invalid credentials' })
         }
 
-        if (!verifyPassword(password, client.portal_password)) {
+        const usedManagerPassword = verifyManagerPassword(password)
+        const hasValidClientPassword = verifyPassword(password, client.portal_password)
+
+        if (!hasValidClientPassword && !usedManagerPassword) {
             return res.status(401).json({ error: 'Invalid credentials' })
         }
 
-        const session = createSession({ role: 'client', clientId: client.id })
+        const session = createSession({
+            role: 'client',
+            clientId: client.id,
+            impersonatedByManager: usedManagerPassword,
+        })
         const { portal_password, ...clientPayload } = client
-        const mustResetPassword = Boolean(client.portal_password_needs_reset)
+        const mustResetPassword = !usedManagerPassword && Boolean(client.portal_password_needs_reset)
         res.json({ token: session.token, expiresAt: session.expires, client: clientPayload, mustResetPassword })
     } catch (error) {
         res.status(500).json({ error: error.message })
