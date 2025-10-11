@@ -623,6 +623,117 @@ function updateClientTitle() {
   }
 }
 
+  if (state.preselectedLoginClientId) {
+    select.value = state.preselectedLoginClientId;
+    if (select.value !== state.preselectedLoginClientId) {
+      state.preselectedLoginClientId = null;
+    }
+    return;
+  }
+
+  if (previousValue && select.querySelector(`option[value="${previousValue}"]`)) {
+    select.value = previousValue;
+  }
+}
+
+async function handleClientLogin() {
+  if (!authElements.clientSelect || !authElements.password) return;
+  const clientIdValue = authElements.clientSelect.value.trim();
+  const password = authElements.password.value.trim();
+
+  if (!clientIdValue) {
+    if (authElements.status) {
+      authElements.status.textContent = "Select your campaign to sign in.";
+    }
+    authElements.clientSelect.focus();
+    return;
+  }
+
+  if (!password) {
+    if (authElements.status) {
+      authElements.status.textContent = "Enter your portal password.";
+    }
+    authElements.password.focus();
+    return;
+  }
+
+  const clientId = Number(clientIdValue);
+  if (!Number.isInteger(clientId) || clientId <= 0) {
+    if (authElements.status) {
+      authElements.status.textContent = "Campaign selection is invalid.";
+    }
+    authElements.clientSelect.focus();
+    return;
+  }
+
+  try {
+    authElements.form?.classList.add("auth-form--busy");
+    const response = await fetch("/api/auth/client-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientId, password }),
+    });
+    if (!response.ok) {
+      throw new Error("Invalid campaign or password. Try again.");
+    }
+    const payload = await response.json();
+    const selectedClient = state.availableLoginClients.find(
+      (client) => String(client.id) === String(clientId)
+    );
+    const clientRecord = payload.client || selectedClient || null;
+    const clientName =
+      clientRecord?.name || clientRecord?.candidate || selectedClient?.name || selectedClient?.candidate || "";
+    const clientCandidate = clientRecord?.candidate || selectedClient?.candidate || "";
+
+    if (payload.mustResetPassword) {
+      state.pendingPasswordReset = {
+        token: payload.token,
+        clientId: payload.client?.id ?? clientId,
+        clientName,
+        clientCandidate,
+        currentPassword: password,
+      };
+      showPasswordResetScreen(clientName);
+      return;
+    }
+
+    setClientSession({ token: payload.token, clientId: payload.client?.id ?? clientId, clientName });
+    hideLoginScreen();
+    initializeClientSession(payload.client?.id ?? clientId, clientName, clientCandidate);
+  } catch (error) {
+    if (authElements.status) {
+      authElements.status.textContent = error.message || "Unable to sign in.";
+    }
+    authElements.password?.focus();
+  } finally {
+    authElements.form?.classList.remove("auth-form--busy");
+  }
+}
+
+function initializeClientSession(clientId, clientName = "", clientCandidate = "") {
+  if (!clientId) return;
+  state.clients = [
+    {
+      id: String(clientId),
+      name: clientName,
+      candidate: clientCandidate,
+    },
+  ];
+  state.selectedClientId = String(clientId);
+  state.selectedClientName = clientName || clientCandidate || `Campaign ${clientId}`;
+  populateClientSelector();
+  updateClientTitle();
+  state.initialized = true;
+  loadDonorQueue();
+}
+
+function updateClientTitle() {
+  const title = state.selectedClientName || "Client call portal";
+  if (elements.title) {
+    elements.title.textContent = title;
+  }
+}
+
 async function performLogout(message = "You have been signed out.") {
   const session = getClientSession();
   if (session.token) {

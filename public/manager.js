@@ -117,7 +117,11 @@ function bindAuthEvents() {
 }
 
 function showLoginScreen(message = "") {
-  authElements.screen?.classList.remove("hidden");
+  if (authElements.screen) {
+    authElements.screen.classList.remove("hidden");
+    authElements.screen.style.display = "";
+    authElements.screen.setAttribute("aria-hidden", "false");
+  }
   if (message && authElements.status) {
     authElements.status.textContent = message;
   }
@@ -128,7 +132,11 @@ function showLoginScreen(message = "") {
 }
 
 function hideLoginScreen() {
-  authElements.screen?.classList.add("hidden");
+  if (authElements.screen) {
+    authElements.screen.classList.add("hidden");
+    authElements.screen.style.display = "none";
+    authElements.screen.setAttribute("aria-hidden", "true");
+  }
   if (authElements.status) {
     authElements.status.textContent = "";
   }
