@@ -855,6 +855,22 @@ textarea.input {
   margin: 0;
 }
 
+.auth-return {
+  margin: 0;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.auth-return a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.auth-return a:hover,
+.auth-return a:focus {
+  text-decoration: underline;
+}
+
 .btn--block {
   width: 100%;
   display: inline-flex;
