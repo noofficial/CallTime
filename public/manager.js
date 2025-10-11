@@ -47,6 +47,7 @@ const elements = {
   clientFormGoal: document.getElementById("client-form-goal"),
   clientFormSheet: document.getElementById("client-form-sheet"),
   clientFormNotes: document.getElementById("client-form-notes"),
+  clientFormPassword: document.getElementById("client-form-password"),
   clientFormCancel: document.getElementById("client-form-cancel"),
   clientFormStatus: document.getElementById("client-form-status"),
   clientFormSubmit: document.getElementById("client-form-submit"),
@@ -822,6 +823,18 @@ async function handleClientFormSubmit() {
     const endpoint = isEditMode ? `/api/clients/${targetId}` : "/api/clients";
     const method = isEditMode ? "PUT" : "POST";
 
+    if (!isEditMode && portalPassword.length < 6) {
+      setClientFormStatus("Set a password with at least 6 characters.", "error");
+      elements.clientFormPassword?.focus();
+      return;
+    }
+
+    if (isEditMode && portalPassword && portalPassword.length < 6) {
+      setClientFormStatus("Updated passwords must be at least 6 characters.", "error");
+      elements.clientFormPassword?.focus();
+      return;
+    }
+
     if (isEditMode && !targetId) {
       throw new Error("No client selected for editing");
     }
@@ -1011,6 +1024,9 @@ function prepareClientForm(mode, client = null) {
   } else {
     elements.clientForm?.reset();
   }
+  if (elements.clientFormPassword) {
+    elements.clientFormPassword.value = "";
+  }
   updateClientFormText(client);
   updateResetPasswordButtonVisibility();
 }
@@ -1046,6 +1062,9 @@ function populateClientFormFromRecord(client) {
   }
   if (elements.clientFormNotes) {
     elements.clientFormNotes.value = client.notes || "";
+  }
+  if (elements.clientFormPassword) {
+    elements.clientFormPassword.value = "";
   }
 }
 
