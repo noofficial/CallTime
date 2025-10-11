@@ -106,7 +106,11 @@ async function performLogout(message = "You have been signed out.") {
   renderClients();
   renderDonors();
   renderAssignmentLists();
-  showLoginScreen(message);
+  if (typeof window !== "undefined") {
+    window.location.assign("index.html");
+  } else {
+    showLoginScreen(message);
+  }
 }
 
 function bindAuthEvents() {
