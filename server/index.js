@@ -139,6 +139,20 @@ const parseSuggestedAsk = (value) => {
     return null
 }
 
+const parseNonNegativeNumber = (value) => {
+    if (value === undefined || value === null) return null
+    if (typeof value === 'number') {
+        return Number.isFinite(value) && value >= 0 ? Number(value) : null
+    }
+    if (typeof value === 'string') {
+        const cleaned = value.replace(/[^0-9.+-]/g, '').trim()
+        if (!cleaned) return null
+        const parsed = Number(cleaned)
+        return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
+    }
+    return null
+}
+
 const buildClientLookup = (clients) => {
     const lookup = new Map()
     clients.forEach((client) => {
@@ -528,6 +542,22 @@ const enhanceSchema = () => {
                 FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,
                 FOREIGN KEY(donor_id) REFERENCES donors(id) ON DELETE CASCADE
             );
+
+            -- Giving history for contribution tracking
+            CREATE TABLE IF NOT EXISTS giving_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                donor_id INTEGER NOT NULL,
+                year INTEGER NOT NULL,
+                candidate TEXT NOT NULL,
+                amount REAL NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(donor_id) REFERENCES donors(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_giving_history_donor ON giving_history(donor_id);
+            CREATE INDEX IF NOT EXISTS idx_giving_history_candidate_year ON giving_history(candidate, year);
+            CREATE INDEX IF NOT EXISTS idx_giving_history_year ON giving_history(year);
+            CREATE INDEX IF NOT EXISTS idx_giving_history_amount ON giving_history(amount);
 
             -- Donor assignments (which clients can see which donors)
             CREATE TABLE IF NOT EXISTS donor_assignments (
@@ -1791,6 +1821,217 @@ function getDonorDetail(donorId) {
         client_notes: clientNotes,
     }
 }
+
+function buildGivingSummary(rows = []) {
+    const donors = new Map()
+    const years = new Map()
+    let totalAmount = 0
+    let contributionCount = 0
+
+    rows.forEach((row) => {
+        if (!row) return
+        const donorId = row.donor_id != null ? String(row.donor_id) : null
+        const donorName = row.donor_name || ''
+        const amountValue = Number(row.amount)
+        const amount = Number.isFinite(amountValue) ? amountValue : 0
+        const yearValue = Number(row.year)
+        const year = Number.isFinite(yearValue) ? yearValue : null
+        const candidate = row.candidate || null
+
+        contributionCount += 1
+        totalAmount += amount
+
+        if (donorId) {
+            if (!donors.has(donorId)) {
+                donors.set(donorId, {
+                    donorId,
+                    donorName: donorName || 'Unnamed donor',
+                    totalAmount: 0,
+                    contributionCount: 0,
+                    contributions: []
+                })
+            }
+            const donorEntry = donors.get(donorId)
+            donorEntry.totalAmount += amount
+            donorEntry.contributionCount += 1
+            donorEntry.contributions.push({
+                id: row.id != null ? String(row.id) : null,
+                year,
+                amount,
+                candidate,
+                createdAt: row.created_at || null
+            })
+        }
+
+        const yearKey = year === null ? '__unspecified__' : String(year)
+        if (!years.has(yearKey)) {
+            years.set(yearKey, {
+                year,
+                donorIds: new Set(),
+                contributionCount: 0,
+                totalAmount: 0
+            })
+        }
+        const yearEntry = years.get(yearKey)
+        yearEntry.contributionCount += 1
+        yearEntry.totalAmount += amount
+        if (donorId) {
+            yearEntry.donorIds.add(donorId)
+        }
+    })
+
+    const donorCollection = Array.from(donors.values()).map((donor) => {
+        donor.contributions.sort((a, b) => {
+            const yearA = a.year === null ? -Infinity : a.year
+            const yearB = b.year === null ? -Infinity : b.year
+            if (yearA !== yearB) {
+                return yearB - yearA
+            }
+            if (a.amount !== b.amount) {
+                return b.amount - a.amount
+            }
+            const candidateA = (a.candidate || '').toLowerCase()
+            const candidateB = (b.candidate || '').toLowerCase()
+            if (candidateA !== candidateB) {
+                return candidateA < candidateB ? -1 : 1
+            }
+            return 0
+        })
+        return donor
+    })
+
+    donorCollection.sort((a, b) => {
+        if (b.totalAmount !== a.totalAmount) {
+            return b.totalAmount - a.totalAmount
+        }
+        return (a.donorName || '').localeCompare(b.donorName || '')
+    })
+
+    const yearCollection = Array.from(years.values()).map((entry) => ({
+        year: entry.year,
+        donorCount: entry.donorIds.size,
+        contributionCount: entry.contributionCount,
+        totalAmount: entry.totalAmount
+    }))
+
+    yearCollection.sort((a, b) => {
+        if (a.year === null && b.year === null) return 0
+        if (a.year === null) return 1
+        if (b.year === null) return -1
+        return b.year - a.year
+    })
+
+    return {
+        totals: {
+            totalAmount,
+            contributionCount,
+            donorCount: donorCollection.length
+        },
+        donors: donorCollection,
+        years: yearCollection
+    }
+}
+
+app.get('/api/giving/candidates/:candidate/summary', authenticateManager, (req, res) => {
+    const requested = (req.params.candidate || '').trim()
+    if (!requested) {
+        return res.status(400).json({ error: 'candidate parameter required' })
+    }
+
+    try {
+        const contributions = db.prepare(`
+            SELECT gh.id, gh.donor_id, gh.year, gh.candidate, gh.amount, gh.created_at,
+                   d.name AS donor_name
+            FROM giving_history gh
+            JOIN donors d ON d.id = gh.donor_id
+            WHERE LOWER(TRIM(gh.candidate)) = LOWER(TRIM(?))
+            ORDER BY gh.year DESC, gh.created_at DESC
+        `).all(requested)
+
+        const summary = buildGivingSummary(contributions)
+        const displayCandidate = contributions.find((row) => row && row.candidate)?.candidate || requested
+
+        res.json({
+            candidate: displayCandidate,
+            requestedCandidate: requested,
+            totals: summary.totals,
+            years: summary.years,
+            donors: summary.donors,
+        })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+})
+
+app.get('/api/giving/search', authenticateManager, (req, res) => {
+    const year = parseInteger(req.query.year)
+    const amount = parseNonNegativeNumber(req.query.amount)
+    let minAmount = parseNonNegativeNumber(req.query.minAmount)
+    let maxAmount = parseNonNegativeNumber(req.query.maxAmount)
+
+    if (amount !== null) {
+        minAmount = null
+        maxAmount = null
+    } else if (minAmount !== null && maxAmount !== null && minAmount > maxAmount) {
+        const temp = minAmount
+        minAmount = maxAmount
+        maxAmount = temp
+    }
+
+    if (year === null && amount === null && minAmount === null && maxAmount === null) {
+        return res.status(400).json({ error: 'Provide at least one search filter (year or amount).' })
+    }
+
+    const filters = []
+    const params = []
+
+    if (year !== null) {
+        filters.push('gh.year = ?')
+        params.push(year)
+    }
+    if (amount !== null) {
+        filters.push('gh.amount = ?')
+        params.push(amount)
+    } else {
+        if (minAmount !== null) {
+            filters.push('gh.amount >= ?')
+            params.push(minAmount)
+        }
+        if (maxAmount !== null) {
+            filters.push('gh.amount <= ?')
+            params.push(maxAmount)
+        }
+    }
+
+    const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : ''
+
+    try {
+        const contributions = db.prepare(`
+            SELECT gh.id, gh.donor_id, gh.year, gh.candidate, gh.amount, gh.created_at,
+                   d.name AS donor_name
+            FROM giving_history gh
+            JOIN donors d ON d.id = gh.donor_id
+            ${whereClause}
+            ORDER BY d.name COLLATE NOCASE, gh.year DESC, gh.created_at DESC
+        `).all(...params)
+
+        const summary = buildGivingSummary(contributions)
+
+        res.json({
+            filters: {
+                year,
+                amount,
+                minAmount: amount !== null ? null : minAmount,
+                maxAmount: amount !== null ? null : maxAmount,
+            },
+            totals: summary.totals,
+            years: summary.years,
+            donors: summary.donors,
+        })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+})
 
 // Get giving history
 app.get('/api/donors/:donorId/giving', authenticateManager, (req, res) => {
