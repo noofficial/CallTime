@@ -45,7 +45,6 @@ const elements = {
   clientFormPhone: document.getElementById("client-form-phone"),
   clientFormLaunch: document.getElementById("client-form-launch"),
   clientFormGoal: document.getElementById("client-form-goal"),
-  clientFormSheet: document.getElementById("client-form-sheet"),
   clientFormNotes: document.getElementById("client-form-notes"),
   clientFormPassword: document.getElementById("client-form-password"),
   clientFormCancel: document.getElementById("client-form-cancel"),
@@ -433,7 +432,6 @@ function renderClients() {
   const contactPhone = client.contact_phone || client.contactPhone || "";
   const launchDate = client.launch_date || client.launchDate || "";
   const fundraisingGoal = client.fundraising_goal ?? client.fundraisingGoal ?? "";
-  const sheetUrl = client.sheet_url || client.sheetUrl || "";
   const notes = client.notes || "";
 
   const metaHtml = [
@@ -441,7 +439,6 @@ function renderClients() {
     renderClientMetaItem("Contact", formatContact(contactEmail, contactPhone)),
     renderClientMetaItem("Launch date", formatLaunchDate(launchDate)),
     renderClientMetaItem("Fundraising goal", formatFundraisingGoal(fundraisingGoal)),
-    renderClientMetaItem("Data source", formatDataSource(sheetUrl)),
   ].join("");
 
   const notesHtml = notes
@@ -779,7 +776,6 @@ function readClientFormValues() {
     launchDate: elements.clientFormLaunch?.value.trim() || "",
     goalInput: elements.clientFormGoal?.value.trim() || "",
     fundraisingGoal: parseFundraisingGoal(elements.clientFormGoal?.value.trim() || ""),
-    sheetUrl: elements.clientFormSheet?.value.trim() || "",
     notes: elements.clientFormNotes?.value.trim() || "",
   };
 }
@@ -802,7 +798,6 @@ async function handleClientFormSubmit() {
     launchDate,
     goalInput,
     fundraisingGoal,
-    sheetUrl,
     notes,
   } = values;
 
@@ -852,7 +847,6 @@ async function handleClientFormSubmit() {
       contactPhone,
       launchDate,
       fundraisingGoal,
-      sheetUrl,
       notes,
     };
 
@@ -938,7 +932,6 @@ async function handlePortalPasswordReset() {
         contactPhone: values.contactPhone,
         launchDate: values.launchDate,
         fundraisingGoal: values.fundraisingGoal,
-        sheetUrl: values.sheetUrl,
         notes: values.notes,
         resetPortalPassword: true,
       }),
@@ -1059,10 +1052,6 @@ function populateClientFormFromRecord(client) {
   const fundraisingGoal = client.fundraising_goal ?? client.fundraisingGoal ?? "";
   if (elements.clientFormGoal) {
     elements.clientFormGoal.value = fundraisingGoal === null ? "" : String(fundraisingGoal);
-  }
-  const sheetUrl = client.sheet_url ?? client.sheetUrl ?? "";
-  if (elements.clientFormSheet) {
-    elements.clientFormSheet.value = sheetUrl;
   }
   if (elements.clientFormNotes) {
     elements.clientFormNotes.value = client.notes || "";
@@ -1234,23 +1223,4 @@ function formatFundraisingGoal(value) {
     return "";
   }
   return `$${numeric.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-}
-
-function formatDataSource(url) {
-  if (!url) {
-    return { value: "", isHtml: true };
-  }
-  try {
-    const parsed = new URL(url, window.location.origin);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return { value: parsed.href, isHtml: false };
-    }
-    const label = parsed.hostname.replace(/^www\./, "");
-    return {
-      value: `<a href="${escapeHtml(parsed.href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`,
-      isHtml: true,
-    };
-  } catch (error) {
-    return { value: url, isHtml: false };
-  }
 }
