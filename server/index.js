@@ -925,7 +925,6 @@ app.post('/api/clients', authenticateManager, (req, res) => {
     const name = sanitizeClientField(payload.name)
     if (!name) return res.status(400).json({ error: 'name required' })
 
-    const sheetUrl = sanitizeClientField(payload.sheet_url ?? payload.sheetUrl)
     const candidate = sanitizeClientField(payload.candidate)
     const office = sanitizeClientField(payload.office)
     const managerName = sanitizeClientField(payload.managerName ?? payload.manager_name)
@@ -945,7 +944,6 @@ app.post('/api/clients', authenticateManager, (req, res) => {
         const stmt = db.prepare(`
             INSERT INTO clients(
                 name,
-                sheet_url,
                 candidate,
                 office,
                 manager_name,
@@ -957,11 +955,10 @@ app.post('/api/clients', authenticateManager, (req, res) => {
                 portal_password,
                 portal_password_needs_reset
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
         `)
         const result = stmt.run(
             name,
-            sheetUrl,
             candidate,
             office,
             managerName,
@@ -993,7 +990,6 @@ app.put('/api/clients/:clientId', authenticateManager, (req, res) => {
         return res.status(400).json({ error: 'name required' })
     }
 
-    const sheetUrl = sanitizeClientField(payload.sheet_url ?? payload.sheetUrl)
     const candidate = sanitizeClientField(payload.candidate)
     const office = sanitizeClientField(payload.office)
     const managerName = sanitizeClientField(payload.managerName ?? payload.manager_name)
@@ -1027,7 +1023,6 @@ app.put('/api/clients/:clientId', authenticateManager, (req, res) => {
         const sql = `
             UPDATE clients
             SET name = ?,
-                sheet_url = ?,
                 candidate = ?,
                 office = ?,
                 manager_name = ?,
@@ -1041,7 +1036,6 @@ app.put('/api/clients/:clientId', authenticateManager, (req, res) => {
 
         const params = [
             name,
-            sheetUrl,
             candidate,
             office,
             managerName,
