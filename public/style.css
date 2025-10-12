@@ -902,6 +902,20 @@ textarea.input {
   color: var(--color-text-secondary);
 }
 
+.form-status {
+  margin-top: 0.5rem;
+  font-size: 0.95rem;
+  color: var(--color-text-secondary);
+}
+
+.form-status--error {
+  color: var(--color-error);
+}
+
+.form-status--success {
+  color: var(--color-success);
+}
+
 .form-help--notice {
   margin-top: 0;
   padding: var(--space-12);
@@ -2196,6 +2210,85 @@ body.modal-open {
 @media (max-width: 900px) {
   .manager-grid .span-2 {
     grid-column: span 1;
+  }
+}
+
+.bulk-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.bulk-upload__dropzone {
+  position: relative;
+  padding: 2.5rem 1.5rem;
+  border: 2px dashed rgba(var(--color-brown-600-rgb, 87, 72, 49), 0.25);
+  border-radius: var(--radius-lg);
+  text-align: center;
+  background: rgba(var(--color-teal-500-rgb, 33, 128, 141), 0.05);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.bulk-upload__dropzone:hover,
+.bulk-upload__dropzone:focus-visible,
+.bulk-upload__dropzone.is-active {
+  border-color: rgba(var(--color-teal-500-rgb, 33, 128, 141), 0.6);
+  background: rgba(var(--color-teal-500-rgb, 33, 128, 141), 0.12);
+  box-shadow: 0 0 0 3px rgba(var(--color-teal-500-rgb, 33, 128, 141), 0.15);
+  outline: none;
+}
+
+.bulk-upload__dropzone.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  box-shadow: none;
+}
+
+.bulk-upload__placeholder {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.bulk-upload__placeholder strong {
+  font-size: 1rem;
+  color: var(--color-text-primary);
+}
+
+.bulk-upload__placeholder span {
+  font-size: 0.95rem;
+  color: var(--color-text-secondary);
+}
+
+.bulk-upload__input {
+  display: none;
+}
+
+.bulk-upload__filename {
+  margin-top: 1rem;
+  font-size: 0.95rem;
+  color: var(--color-text-secondary);
+  word-break: break-word;
+}
+
+.bulk-upload__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 520px) {
+  .bulk-upload__dropzone {
+    padding: 2rem 1rem;
+  }
+
+  .bulk-upload__actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
 
