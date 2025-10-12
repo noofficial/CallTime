@@ -94,6 +94,20 @@ const cleanString = (value) => {
     return converted === '' ? null : converted
 }
 
+const hasValue = (value) => {
+    if (value === undefined || value === null) return false
+    if (typeof value === 'string') {
+        return value.trim() !== ''
+    }
+    if (typeof value === 'number') {
+        return Number.isFinite(value)
+    }
+    if (typeof value === 'boolean') {
+        return true
+    }
+    return String(value).trim() !== ''
+}
+
 const parseInteger = (value) => {
     if (value === undefined || value === null) return null
     if (typeof value === 'number') {
@@ -177,13 +191,20 @@ const transformDonorRow = (row, fallbackClientId, clientLookup) => {
         return { error: 'Missing donor name' }
     }
 
-    const clientId = resolveClientIdFromInputs(row.client_id, row.client_label, fallbackClientId, clientLookup)
-    if (!clientId) {
-        return { error: 'Missing client assignment' }
+    const explicitClientProvided = hasValue(row.client_id) || hasValue(row.client_label)
+    const resolvedClientId = resolveClientIdFromInputs(
+        row.client_id,
+        row.client_label,
+        fallbackClientId,
+        clientLookup
+    )
+
+    if (!resolvedClientId && explicitClientProvided) {
+        return { error: 'Unknown client assignment' }
     }
 
     const donor = {
-        client_id: clientId,
+        client_id: resolvedClientId ?? null,
         name,
         first_name: firstName,
         last_name: lastName,
@@ -200,7 +221,7 @@ const transformDonorRow = (row, fallbackClientId, clientLookup) => {
         photo_url: cleanString(row.photo_url),
     }
 
-    return { donor, donorId }
+    return { donor, donorId, clientId: resolvedClientId ?? null }
 }
 
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 8 // 8 hours
@@ -848,13 +869,6 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
             return { rowNumber: index + 2, values: normalizedRow }
         })
 
-        if (!fallbackClientId) {
-            const hasClientColumn = parsedRows.some(({ values }) => values.client_id || values.client_label)
-            if (!hasClientColumn) {
-                return res.status(400).json({ error: 'Select a client or include a client column in the file.' })
-            }
-        }
-
         const summary = {
             totalRows: rows.length,
             inserted: 0,
@@ -862,6 +876,8 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
             skipped: 0,
             ignoredColumns: Array.from(unknownColumns).sort(),
             errorDetails: [],
+            assigned: 0,
+            unassigned: 0,
         }
 
         const insertStmt = db.prepare(`
@@ -878,7 +894,7 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
 
         const updateStmt = db.prepare(`
             UPDATE donors
-            SET client_id = @client_id,
+            SET client_id = COALESCE(@client_id, client_id),
                 name = @name,
                 first_name = COALESCE(@first_name, first_name),
                 last_name = COALESCE(@last_name, last_name),
@@ -916,7 +932,7 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
                     return
                 }
 
-                const { donor, donorId } = transformed
+                const { donor, donorId, clientId } = transformed
                 let finalDonorId = donorId
 
                 try {
@@ -937,7 +953,12 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
                         summary.inserted += 1
                     }
 
-                    assignStmt.run(donor.client_id, finalDonorId, BULK_UPLOAD_ACTOR)
+                    if (clientId) {
+                        assignStmt.run(clientId, finalDonorId, BULK_UPLOAD_ACTOR)
+                        summary.assigned += 1
+                    } else {
+                        summary.unassigned += 1
+                    }
                 } catch (error) {
                     summary.skipped += 1
                     summary.errorDetails.push(`Row ${rowNumber}: ${error.message}`)
@@ -954,6 +975,8 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
                 inserted: summary.inserted,
                 updated: summary.updated,
                 skipped: summary.skipped,
+                assigned: summary.assigned,
+                unassigned: summary.unassigned,
                 ignoredColumns: summary.ignoredColumns,
                 errorCount: summary.errorDetails.length,
                 errors: summary.errorDetails.slice(0, 20),

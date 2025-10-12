@@ -82,11 +82,14 @@
         <div class="card__body">
           <form id="bulk-upload-form" class="bulk-upload" novalidate>
             <div class="form-row">
-              <label class="form-label" for="bulk-upload-client">Assign donors to client</label>
+              <label class="form-label" for="bulk-upload-client">Assign donors to client (optional)</label>
               <select class="form-control" id="bulk-upload-client" name="clientId">
-                <option value="">Select a client</option>
+                <option value="">No client (import as unassigned)</option>
               </select>
-              <p class="form-help">If the spreadsheet includes a client column, that will override this selection.</p>
+              <p class="form-help">
+                Leave blank to add donors without campaign assignments. If the spreadsheet includes a client column, that
+                will override this selection.
+              </p>
             </div>
             <div
               class="bulk-upload__dropzone"

@@ -697,7 +697,7 @@ function populateBulkUploadClientSelect() {
 
   const placeholder = document.createElement("option");
   placeholder.value = "";
-  placeholder.textContent = "Select a client";
+  placeholder.textContent = "No client (import as unassigned)";
   select.append(placeholder);
 
   state.clients.forEach((client) => {
@@ -1288,6 +1288,8 @@ function buildBulkUploadSummary(summary) {
   const inserted = Number(summary.inserted) || 0;
   const updated = Number(summary.updated) || 0;
   const skipped = Number(summary.skipped) || 0;
+  const assigned = Number(summary.assigned) || 0;
+  const unassigned = Number(summary.unassigned) || 0;
   const ignoredColumns = Array.isArray(summary.ignoredColumns) ? summary.ignoredColumns : [];
   const errorCount = Number(summary.errorCount) || 0;
   const errors = Array.isArray(summary.errors) ? summary.errors : [];
@@ -1307,6 +1309,13 @@ function buildBulkUploadSummary(summary) {
 
   if (ignoredColumns.length) {
     message += ` Ignored columns: ${ignoredColumns.join(", ")}.`;
+  }
+
+  const assignmentParts = [];
+  if (assigned) assignmentParts.push(`${assigned} assigned`);
+  if (unassigned) assignmentParts.push(`${unassigned} unassigned`);
+  if (assignmentParts.length) {
+    message += ` Assignments: ${assignmentParts.join(", ")}.`;
   }
 
   if (errorCount > 0) {
