@@ -23,14 +23,23 @@ CSV exports, and log outcomes that remain private to the active campaign.
 
 ## Running the workspace locally
 
-This is a static web application. Start any HTTP server and open `index.html` in
-your browser:
+The manager workspace and donor upload tools run from the bundled Node server.
+Make sure you have Node.js 18 or newer installed, then install the project
+dependencies (this is required any time `package.json` changes):
 
 ```bash
-python -m http.server 8000
+npm install
 ```
 
-Then navigate to <http://localhost:8000>.
+Once dependencies are installed you can start the API and front end with:
+
+```bash
+npm start
+```
+
+Visit <http://localhost:3000> to use the app. If `npm start` reports a missing
+module such as `multer` or `xlsx`, run `npm install` again to pull the latest
+dependencies before restarting the server.
 
 ## Authentication
 
