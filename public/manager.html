@@ -72,19 +72,48 @@
         </div>
       </article>
 
-      <article class="card">
+      <article class="card card--bulk-upload">
         <div class="card__header">
           <div>
-            <h2>Donor database</h2>
-            <p class="muted">Review assignments and capacity at a glance.</p>
-          </div>
-          <div class="donor-controls">
-            <label class="sr-only" for="manager-donor-search">Search donors</label>
-            <input class="form-control" id="manager-donor-search" type="search" placeholder="Search donors by name, company, or city" autocomplete="off" />
+            <h2>Bulk donor import</h2>
+            <p class="muted">Upload a CSV or Excel file to add or update donors in batches.</p>
           </div>
         </div>
         <div class="card__body">
-          <div id="manager-donors" class="donors-grid donors-grid--table"></div>
+          <form id="bulk-upload-form" class="bulk-upload" novalidate>
+            <div class="form-row">
+              <label class="form-label" for="bulk-upload-client">Assign donors to client</label>
+              <select class="form-control" id="bulk-upload-client" name="clientId">
+                <option value="">Select a client</option>
+              </select>
+              <p class="form-help">If the spreadsheet includes a client column, that will override this selection.</p>
+            </div>
+            <div
+              class="bulk-upload__dropzone"
+              id="bulk-upload-dropzone"
+              role="button"
+              tabindex="0"
+              aria-label="Choose a CSV or Excel file to import donors"
+            >
+              <input
+                class="bulk-upload__input"
+                id="bulk-upload-input"
+                name="file"
+                type="file"
+                accept=".csv, application/vnd.ms-excel, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              />
+              <div class="bulk-upload__placeholder" aria-hidden="true">
+                <strong>Drag and drop a CSV or Excel file</strong>
+                <span>or click to browse</span>
+              </div>
+              <div class="bulk-upload__filename" id="bulk-upload-filename" aria-live="polite"></div>
+            </div>
+            <div class="bulk-upload__actions">
+              <button class="btn btn--primary" type="submit" id="bulk-upload-submit" disabled>Import donors</button>
+              <button class="btn btn--ghost" type="button" id="bulk-upload-clear" disabled>Clear file</button>
+            </div>
+            <p class="form-status" id="bulk-upload-status" role="status"></p>
+          </form>
         </div>
       </article>
 

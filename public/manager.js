@@ -22,6 +22,11 @@ const state = {
   editingClientId: null,
   hasBoundEvents: false,
   initialized: false,
+  bulkUpload: {
+    file: null,
+    fileName: "",
+    uploading: false,
+  },
 };
 
 const elements = {
@@ -55,6 +60,14 @@ const elements = {
   clientModalDescription: document.getElementById("client-modal-description"),
   logout: document.getElementById("manager-logout"),
   clientResetPassword: document.getElementById("client-reset-password"),
+  bulkUploadForm: document.getElementById("bulk-upload-form"),
+  bulkUploadClient: document.getElementById("bulk-upload-client"),
+  bulkUploadDropzone: document.getElementById("bulk-upload-dropzone"),
+  bulkUploadInput: document.getElementById("bulk-upload-input"),
+  bulkUploadFilename: document.getElementById("bulk-upload-filename"),
+  bulkUploadStatus: document.getElementById("bulk-upload-status"),
+  bulkUploadSubmit: document.getElementById("bulk-upload-submit"),
+  bulkUploadClear: document.getElementById("bulk-upload-clear"),
 };
 
 const authElements = {
@@ -102,6 +115,10 @@ async function performLogout(message = "You have been signed out.") {
   state.assignedDonors = new Map();
   state.loadingAssignments = false;
   state.initialized = false;
+  state.bulkUpload.file = null;
+  state.bulkUpload.fileName = "";
+  state.bulkUpload.uploading = false;
+  clearBulkUploadFile();
   renderClients();
   renderDonors();
   renderAssignmentLists();
@@ -277,6 +294,61 @@ function bindEvents() {
   elements.logout?.addEventListener("click", () => {
     performLogout();
   });
+
+  elements.bulkUploadForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    handleBulkUploadSubmit();
+  });
+
+  elements.bulkUploadDropzone?.addEventListener("click", () => {
+    if (state.bulkUpload.uploading) return;
+    elements.bulkUploadInput?.click();
+  });
+
+  elements.bulkUploadDropzone?.addEventListener("keydown", (event) => {
+    if (state.bulkUpload.uploading) return;
+    handleBulkUploadKeydown(event);
+  });
+
+  elements.bulkUploadDropzone?.addEventListener("dragover", (event) => {
+    if (state.bulkUpload.uploading) return;
+    handleBulkUploadDragOver(event);
+  });
+
+  elements.bulkUploadDropzone?.addEventListener("dragenter", (event) => {
+    if (state.bulkUpload.uploading) return;
+    handleBulkUploadDragOver(event);
+  });
+
+  elements.bulkUploadDropzone?.addEventListener("dragleave", (event) => {
+    if (state.bulkUpload.uploading) return;
+    handleBulkUploadDragLeave(event);
+  });
+
+  elements.bulkUploadDropzone?.addEventListener("drop", (event) => {
+    if (state.bulkUpload.uploading) {
+      event.preventDefault();
+      return;
+    }
+    handleBulkUploadDrop(event);
+  });
+
+  elements.bulkUploadInput?.addEventListener("change", (event) => {
+    if (state.bulkUpload.uploading) return;
+    handleBulkUploadInput(event);
+  });
+
+  elements.bulkUploadClear?.addEventListener("click", () => {
+    if (state.bulkUpload.uploading) return;
+    clearBulkUploadFile();
+  });
+
+  elements.bulkUploadClient?.addEventListener("change", () => {
+    if (state.bulkUpload.uploading) return;
+    clearBulkUploadStatus();
+  });
+
+  updateBulkUploadUI();
 }
 
 async function loadOverview() {
@@ -288,6 +360,7 @@ async function loadOverview() {
     ensureCurrentClientSelection();
     renderClients();
     populateAssignmentSelect();
+    populateBulkUploadClientSelect();
   } catch (error) {
     reportError(error);
   }
@@ -611,6 +684,29 @@ function populateAssignmentSelect() {
     option.textContent = client.name || client.candidate || "Unnamed campaign";
     select.append(option);
   });
+  if (previous && state.clients.some((client) => String(client.id) === String(previous))) {
+    select.value = previous;
+  }
+}
+
+function populateBulkUploadClientSelect() {
+  const select = elements.bulkUploadClient;
+  if (!select) return;
+  const previous = select.value;
+  select.innerHTML = "";
+
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select a client";
+  select.append(placeholder);
+
+  state.clients.forEach((client) => {
+    const option = document.createElement("option");
+    option.value = client.id;
+    option.textContent = client.name || client.candidate || `Client ${client.id}`;
+    select.append(option);
+  });
+
   if (previous && state.clients.some((client) => String(client.id) === String(previous))) {
     select.value = previous;
   }
@@ -950,6 +1046,290 @@ async function handlePortalPasswordReset() {
   } finally {
     setClientFormBusy(false);
   }
+}
+
+async function handleBulkUploadSubmit() {
+  if (state.bulkUpload.uploading) return;
+  if (!state.bulkUpload.file) {
+    setBulkUploadStatus("Choose a CSV or Excel file before importing.", "error");
+    return;
+  }
+
+  setBulkUploadUploading(true);
+  setBulkUploadStatus("Importing donors…");
+
+  try {
+    const formData = new FormData();
+    formData.append("file", state.bulkUpload.file);
+    const clientValue = elements.bulkUploadClient?.value?.trim();
+    if (clientValue) {
+      formData.append("clientId", clientValue);
+    }
+
+    const response = await managerFetch("/api/manager/donors/upload", {
+      method: "POST",
+      body: formData,
+    });
+
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      payload = null;
+    }
+
+    if (!response.ok) {
+      const message =
+        payload && typeof payload === "object" && payload.error
+          ? payload.error
+          : "Unable to import donors.";
+      throw new Error(message);
+    }
+
+    const summary = payload && typeof payload === "object" ? payload.summary : null;
+    setBulkUploadStatus(buildBulkUploadSummary(summary), "success");
+    clearBulkUploadFile({ preserveStatus: true });
+    await Promise.all([loadOverview(), loadDonors()]);
+  } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      reportError(error);
+      return;
+    }
+    setBulkUploadStatus(error.message || "Unable to import donors.", "error");
+  } finally {
+    setBulkUploadUploading(false);
+  }
+}
+
+function handleBulkUploadInput(event) {
+  const file = event?.target?.files?.[0] || null;
+  if (!file) {
+    setBulkUploadFile(null);
+    return;
+  }
+  setBulkUploadFile(file);
+}
+
+function handleBulkUploadDrop(event) {
+  event.preventDefault();
+  const file = event?.dataTransfer?.files?.[0] || null;
+  setBulkUploadDropzoneActive(false);
+  if (!file) return;
+  setBulkUploadFile(file);
+}
+
+function handleBulkUploadDragOver(event) {
+  event.preventDefault();
+  if (event?.dataTransfer) {
+    event.dataTransfer.dropEffect = "copy";
+  }
+  setBulkUploadDropzoneActive(true);
+}
+
+function handleBulkUploadDragLeave(event) {
+  if (!elements.bulkUploadDropzone) return;
+  const related = event?.relatedTarget;
+  if (related && elements.bulkUploadDropzone.contains(related)) {
+    return;
+  }
+  setBulkUploadDropzoneActive(false);
+}
+
+function handleBulkUploadKeydown(event) {
+  if (!event) return;
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    elements.bulkUploadInput?.click();
+  }
+}
+
+function setBulkUploadDropzoneActive(isActive) {
+  if (!elements.bulkUploadDropzone) return;
+  if (isActive) {
+    elements.bulkUploadDropzone.classList.add("is-active");
+  } else {
+    elements.bulkUploadDropzone.classList.remove("is-active");
+  }
+}
+
+function setBulkUploadFile(file) {
+  if (!file) {
+    state.bulkUpload.file = null;
+    state.bulkUpload.fileName = "";
+    if (elements.bulkUploadInput) {
+      elements.bulkUploadInput.value = "";
+    }
+    updateBulkUploadUI();
+    return;
+  }
+
+  const validationError = validateBulkUploadFile(file);
+  if (validationError) {
+    state.bulkUpload.file = null;
+    state.bulkUpload.fileName = "";
+    if (elements.bulkUploadInput) {
+      elements.bulkUploadInput.value = "";
+    }
+    updateBulkUploadUI();
+    setBulkUploadStatus(validationError, "error");
+    return;
+  }
+
+  state.bulkUpload.file = file;
+  state.bulkUpload.fileName = file.name || "Selected file";
+  updateBulkUploadUI();
+  setBulkUploadStatus(`Selected ${state.bulkUpload.fileName}. Ready to import.`);
+}
+
+function clearBulkUploadFile(options = {}) {
+  state.bulkUpload.file = null;
+  state.bulkUpload.fileName = "";
+  if (elements.bulkUploadInput) {
+    elements.bulkUploadInput.value = "";
+  }
+  if (!options?.preserveStatus) {
+    clearBulkUploadStatus();
+  }
+  updateBulkUploadUI();
+}
+
+function setBulkUploadUploading(isUploading) {
+  state.bulkUpload.uploading = Boolean(isUploading);
+  if (elements.bulkUploadInput) {
+    elements.bulkUploadInput.disabled = state.bulkUpload.uploading;
+  }
+  setBulkUploadDropzoneActive(false);
+  updateBulkUploadUI();
+}
+
+function updateBulkUploadUI() {
+  const file = state.bulkUpload.file;
+  const uploading = state.bulkUpload.uploading;
+
+  if (elements.bulkUploadFilename) {
+    if (file) {
+      const sizeText = typeof file.size === "number" ? ` (${formatFileSize(file.size)})` : "";
+      const name = state.bulkUpload.fileName || file.name || "Selected file";
+      elements.bulkUploadFilename.textContent = `${name}${sizeText}`;
+    } else {
+      elements.bulkUploadFilename.textContent = "";
+    }
+  }
+
+  if (elements.bulkUploadSubmit) {
+    elements.bulkUploadSubmit.disabled = !file || uploading;
+  }
+
+  if (elements.bulkUploadClear) {
+    elements.bulkUploadClear.disabled = !file || uploading;
+  }
+
+  if (elements.bulkUploadDropzone) {
+    elements.bulkUploadDropzone.classList.toggle("is-disabled", uploading);
+    elements.bulkUploadDropzone.setAttribute("aria-busy", uploading ? "true" : "false");
+    elements.bulkUploadDropzone.setAttribute("aria-disabled", uploading ? "true" : "false");
+  }
+}
+
+function setBulkUploadStatus(message, tone = "") {
+  if (!elements.bulkUploadStatus) return;
+  elements.bulkUploadStatus.textContent = message || "";
+  elements.bulkUploadStatus.classList.remove("form-status--error", "form-status--success");
+  if (!message) {
+    return;
+  }
+  if (tone === "error") {
+    elements.bulkUploadStatus.classList.add("form-status--error");
+  } else if (tone === "success") {
+    elements.bulkUploadStatus.classList.add("form-status--success");
+  }
+}
+
+function clearBulkUploadStatus() {
+  setBulkUploadStatus("");
+}
+
+function validateBulkUploadFile(file) {
+  if (!file) {
+    return "Select a CSV or Excel file.";
+  }
+
+  const allowedExtensions = [".csv", ".xls", ".xlsx"];
+  const allowedTypes = new Set([
+    "text/csv",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ]);
+
+  const lowerName = (file.name || "").toLowerCase();
+  const hasAllowedExtension = allowedExtensions.some((ext) => lowerName.endsWith(ext));
+  const hasAllowedType = file.type ? allowedTypes.has(file.type) : false;
+  if (!hasAllowedExtension && !hasAllowedType) {
+    return "Use a CSV or Excel (.xlsx) file.";
+  }
+
+  if (typeof file.size === "number" && file.size > 10 * 1024 * 1024) {
+    return "File is too large. Choose a file smaller than 10 MB.";
+  }
+
+  if (typeof file.size === "number" && file.size === 0) {
+    return "The selected file is empty.";
+  }
+
+  return null;
+}
+
+function buildBulkUploadSummary(summary) {
+  if (!summary || typeof summary !== "object") {
+    return "Import completed.";
+  }
+
+  const totalRows = Number(summary.totalRows) || 0;
+  const inserted = Number(summary.inserted) || 0;
+  const updated = Number(summary.updated) || 0;
+  const skipped = Number(summary.skipped) || 0;
+  const ignoredColumns = Array.isArray(summary.ignoredColumns) ? summary.ignoredColumns : [];
+  const errorCount = Number(summary.errorCount) || 0;
+  const errors = Array.isArray(summary.errors) ? summary.errors : [];
+
+  const parts = [];
+  if (inserted) parts.push(`${inserted} new`);
+  if (updated) parts.push(`${updated} updated`);
+  if (skipped) parts.push(`${skipped} skipped`);
+
+  let message = totalRows
+    ? `Processed ${totalRows} row${totalRows === 1 ? "" : "s"}.`
+    : "Import completed.";
+
+  if (parts.length) {
+    message += ` Breakdown: ${parts.join(", ")}.`;
+  }
+
+  if (ignoredColumns.length) {
+    message += ` Ignored columns: ${ignoredColumns.join(", ")}.`;
+  }
+
+  if (errorCount > 0) {
+    message += ` ${errorCount} row${errorCount === 1 ? "" : "s"} skipped.`;
+    if (errors.length) {
+      message += ` Example: ${errors[0]}.`;
+    }
+  }
+
+  return message.trim();
+}
+
+function formatFileSize(bytes) {
+  if (typeof bytes !== "number" || Number.isNaN(bytes) || bytes < 0) {
+    return "";
+  }
+  if (bytes < 1024) {
+    return `${Math.round(bytes)} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function reportError(error) {
