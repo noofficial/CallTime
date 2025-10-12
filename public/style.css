@@ -823,6 +823,11 @@ textarea.input {
   max-width: 420px;
   width: min(100%, 420px);
   box-shadow: 0 32px 60px rgba(var(--color-slate-900-rgb), 0.25);
+  --color-text: var(--color-slate-900);
+  --color-text-secondary: rgba(var(--color-slate-500-rgb), 0.85);
+  --color-surface: var(--color-white);
+  --color-border: rgba(var(--color-brown-600-rgb), 0.25);
+  color: var(--color-text);
 }
 
 .auth-panel h1 {
@@ -841,6 +846,20 @@ textarea.input {
 
 .auth-form .form-control {
   width: 100%;
+}
+
+.auth-panel .form-control {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+.auth-panel .form-control::placeholder {
+  color: rgba(var(--color-slate-500-rgb), 0.7);
+}
+
+.auth-panel select.form-control {
+  background-image: var(--select-caret-light);
 }
 
 .auth-form--busy {
