@@ -3,6 +3,8 @@ const cors = require('cors')
 const path = require('path')
 const fs = require('fs')
 const crypto = require('crypto')
+const multer = require('multer')
+const xlsx = require('xlsx')
 const Database = require('better-sqlite3')
 
 const app = express()
@@ -11,6 +13,216 @@ app.use(express.json())
 
 // Serve static files from the public directory
 app.use(express.static(path.join(__dirname, '..', 'public')))
+
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024 },
+})
+
+const BULK_UPLOAD_ACTOR = 'bulk-import'
+
+const normalizeColumnName = (value) => {
+    if (value === undefined || value === null) return ''
+    return String(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, '')
+}
+
+const DONOR_COLUMN_MAP = new Map([
+    ['name', 'name'],
+    ['fullname', 'name'],
+    ['donorname', 'name'],
+    ['firstname', 'first_name'],
+    ['givenname', 'first_name'],
+    ['preferredname', 'first_name'],
+    ['lastname', 'last_name'],
+    ['surname', 'last_name'],
+    ['last', 'last_name'],
+    ['phone', 'phone'],
+    ['phonenumber', 'phone'],
+    ['phone1', 'phone'],
+    ['mobile', 'phone'],
+    ['cell', 'phone'],
+    ['email', 'email'],
+    ['emailaddress', 'email'],
+    ['city', 'city'],
+    ['town', 'city'],
+    ['employer', 'employer'],
+    ['company', 'employer'],
+    ['organization', 'employer'],
+    ['workplace', 'employer'],
+    ['occupation', 'occupation'],
+    ['jobtitle', 'occupation'],
+    ['profession', 'occupation'],
+    ['bio', 'bio'],
+    ['biography', 'bio'],
+    ['notes', 'notes'],
+    ['tags', 'tags'],
+    ['tag', 'tags'],
+    ['ask', 'suggested_ask'],
+    ['askamount', 'suggested_ask'],
+    ['suggestedask', 'suggested_ask'],
+    ['targetask', 'suggested_ask'],
+    ['capacity', 'suggested_ask'],
+    ['lastgift', 'last_gift_note'],
+    ['lastgiftnote', 'last_gift_note'],
+    ['photourl', 'photo_url'],
+    ['pictureurl', 'photo_url'],
+    ['imageurl', 'photo_url'],
+    ['avatar', 'photo_url'],
+    ['clientid', 'client_id'],
+    ['client', 'client_id'],
+    ['clientname', 'client_label'],
+    ['campaign', 'client_label'],
+    ['candidate', 'client_label'],
+    ['id', 'id'],
+    ['donorid', 'id'],
+    ['recordid', 'id'],
+])
+
+const cleanString = (value) => {
+    if (value === undefined || value === null) return null
+    if (typeof value === 'string') {
+        const trimmed = value.trim()
+        return trimmed === '' ? null : trimmed
+    }
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? String(value) : null
+    }
+    if (typeof value === 'boolean') {
+        return value ? 'true' : 'false'
+    }
+    const converted = String(value).trim()
+    return converted === '' ? null : converted
+}
+
+const hasValue = (value) => {
+    if (value === undefined || value === null) return false
+    if (typeof value === 'string') {
+        return value.trim() !== ''
+    }
+    if (typeof value === 'number') {
+        return Number.isFinite(value)
+    }
+    if (typeof value === 'boolean') {
+        return true
+    }
+    return String(value).trim() !== ''
+}
+
+const parseInteger = (value) => {
+    if (value === undefined || value === null) return null
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value)) return null
+        const int = Math.trunc(value)
+        return int > 0 ? int : null
+    }
+    if (typeof value === 'string') {
+        const trimmed = value.trim()
+        if (!trimmed) return null
+        if (!/^\d+$/.test(trimmed)) return null
+        const int = parseInt(trimmed, 10)
+        return int > 0 ? int : null
+    }
+    return null
+}
+
+const parseSuggestedAsk = (value) => {
+    if (value === undefined || value === null) return null
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? Number(value) : null
+    }
+    if (typeof value === 'string') {
+        const cleaned = value.replace(/[^0-9.+-]/g, '').trim()
+        if (!cleaned) return null
+        const parsed = Number(cleaned)
+        return Number.isFinite(parsed) ? parsed : null
+    }
+    return null
+}
+
+const buildClientLookup = (clients) => {
+    const lookup = new Map()
+    clients.forEach((client) => {
+        if (!client || typeof client !== 'object') return
+        const candidates = [client.name, client.candidate]
+        candidates.forEach((label) => {
+            const normalized = normalizeColumnName(label)
+            if (normalized) {
+                lookup.set(normalized, client.id)
+            }
+        })
+    })
+    return lookup
+}
+
+const resolveClientIdFromInputs = (rawId, label, fallback, lookup) => {
+    const directId = parseInteger(rawId)
+    if (directId) return directId
+
+    if (typeof rawId === 'string' && rawId.trim()) {
+        const normalized = normalizeColumnName(rawId)
+        const lookedUp = lookup.get(normalized)
+        if (lookedUp) return lookedUp
+    }
+
+    if (label) {
+        const normalized = normalizeColumnName(label)
+        const lookedUp = lookup.get(normalized)
+        if (lookedUp) return lookedUp
+    }
+
+    const fallbackId = parseInteger(fallback)
+    if (fallbackId) return fallbackId
+
+    return null
+}
+
+const transformDonorRow = (row, fallbackClientId, clientLookup) => {
+    const donorId = parseInteger(row.id)
+    const firstName = cleanString(row.first_name)
+    const lastName = cleanString(row.last_name)
+    let name = cleanString(row.name)
+
+    if (!name) {
+        const combined = [firstName, lastName].filter(Boolean).join(' ').trim()
+        name = combined || null
+    }
+
+    if (!name) {
+        return { error: 'Missing donor name' }
+    }
+
+    const explicitClientProvided = hasValue(row.client_id) || hasValue(row.client_label)
+    const resolvedClientId = resolveClientIdFromInputs(
+        row.client_id,
+        row.client_label,
+        fallbackClientId,
+        clientLookup
+    )
+
+    if (!resolvedClientId && explicitClientProvided) {
+        return { error: 'Unknown client assignment' }
+    }
+
+    const donor = {
+        client_id: resolvedClientId ?? null,
+        name,
+        first_name: firstName,
+        last_name: lastName,
+        phone: cleanString(row.phone),
+        email: cleanString(row.email),
+        city: cleanString(row.city),
+        employer: cleanString(row.employer),
+        occupation: cleanString(row.occupation),
+        tags: cleanString(row.tags),
+        suggested_ask: parseSuggestedAsk(row.suggested_ask),
+        last_gift_note: cleanString(row.last_gift_note),
+        notes: cleanString(row.notes),
+        bio: cleanString(row.bio),
+        photo_url: cleanString(row.photo_url),
+    }
+
+    return { donor, donorId, clientId: resolvedClientId ?? null }
+}
 
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 8 // 8 hours
 const sessions = new Map()
@@ -618,6 +830,163 @@ app.post('/api/manager/bulk-assign', authenticateManager, (req, res) => {
     }
 })
 
+app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'), (req, res) => {
+    if (!req.file || !req.file.buffer || !req.file.buffer.length) {
+        return res.status(400).json({ error: 'Upload a CSV or Excel file to import donors.' })
+    }
+
+    try {
+        const workbook = xlsx.read(req.file.buffer, { type: 'buffer' })
+        const [firstSheetName] = workbook.SheetNames
+        if (!firstSheetName) {
+            return res.status(400).json({ error: 'The uploaded file does not contain any worksheets.' })
+        }
+
+        const sheet = workbook.Sheets[firstSheetName]
+        const rows = xlsx.utils.sheet_to_json(sheet, { defval: '', raw: false })
+        if (!rows.length) {
+            return res.status(400).json({ error: 'The uploaded file does not include any donor rows.' })
+        }
+
+        const fallbackClientId = parseInteger(req.body && req.body.clientId)
+        const clients = db.prepare('SELECT id, name, candidate FROM clients').all()
+        const clientLookup = buildClientLookup(clients)
+
+        const unknownColumns = new Set()
+        const parsedRows = rows.map((row, index) => {
+            const normalizedRow = {}
+            Object.entries(row).forEach(([key, value]) => {
+                if (!key) return
+                const normalizedKey = normalizeColumnName(key)
+                if (!normalizedKey) return
+                const mappedColumn = DONOR_COLUMN_MAP.get(normalizedKey)
+                if (!mappedColumn) {
+                    unknownColumns.add(key)
+                    return
+                }
+                normalizedRow[mappedColumn] = value
+            })
+            return { rowNumber: index + 2, values: normalizedRow }
+        })
+
+        const summary = {
+            totalRows: rows.length,
+            inserted: 0,
+            updated: 0,
+            skipped: 0,
+            ignoredColumns: Array.from(unknownColumns).sort(),
+            errorDetails: [],
+            assigned: 0,
+            unassigned: 0,
+        }
+
+        const insertStmt = db.prepare(`
+            INSERT INTO donors (
+                client_id, name, first_name, last_name, phone, email, city,
+                employer, occupation, tags, suggested_ask, last_gift_note,
+                notes, bio, photo_url
+            ) VALUES (
+                @client_id, @name, @first_name, @last_name, @phone, @email, @city,
+                @employer, @occupation, @tags, @suggested_ask, @last_gift_note,
+                @notes, @bio, @photo_url
+            )
+        `)
+
+        const updateStmt = db.prepare(`
+            UPDATE donors
+            SET client_id = COALESCE(@client_id, client_id),
+                name = @name,
+                first_name = COALESCE(@first_name, first_name),
+                last_name = COALESCE(@last_name, last_name),
+                phone = COALESCE(@phone, phone),
+                email = COALESCE(@email, email),
+                city = COALESCE(@city, city),
+                employer = COALESCE(@employer, employer),
+                occupation = COALESCE(@occupation, occupation),
+                tags = COALESCE(@tags, tags),
+                suggested_ask = COALESCE(@suggested_ask, suggested_ask),
+                last_gift_note = COALESCE(@last_gift_note, last_gift_note),
+                notes = COALESCE(@notes, notes),
+                bio = COALESCE(@bio, bio),
+                photo_url = COALESCE(@photo_url, photo_url)
+            WHERE id = @id
+        `)
+
+        const getDonorById = db.prepare('SELECT id FROM donors WHERE id = ?')
+        const assignStmt = db.prepare(`
+            INSERT INTO donor_assignments (client_id, donor_id, assigned_by, is_active)
+            VALUES (?, ?, ?, 1)
+            ON CONFLICT(client_id, donor_id)
+            DO UPDATE SET
+                is_active = 1,
+                assigned_by = excluded.assigned_by,
+                assigned_date = CURRENT_TIMESTAMP
+        `)
+
+        const applyRows = db.transaction((entries) => {
+            entries.forEach(({ rowNumber, values }) => {
+                const transformed = transformDonorRow(values, fallbackClientId, clientLookup)
+                if (!transformed || transformed.error) {
+                    summary.skipped += 1
+                    summary.errorDetails.push(`Row ${rowNumber}: ${transformed?.error || 'Unable to parse donor record.'}`)
+                    return
+                }
+
+                const { donor, donorId, clientId } = transformed
+                let finalDonorId = donorId
+
+                try {
+                    if (donorId) {
+                        const existing = getDonorById.get(donorId)
+                        if (existing) {
+                            updateStmt.run({ ...donor, id: donorId })
+                            finalDonorId = donorId
+                            summary.updated += 1
+                        } else {
+                            const result = insertStmt.run(donor)
+                            finalDonorId = result.lastInsertRowid
+                            summary.inserted += 1
+                        }
+                    } else {
+                        const result = insertStmt.run(donor)
+                        finalDonorId = result.lastInsertRowid
+                        summary.inserted += 1
+                    }
+
+                    if (clientId) {
+                        assignStmt.run(clientId, finalDonorId, BULK_UPLOAD_ACTOR)
+                        summary.assigned += 1
+                    } else {
+                        summary.unassigned += 1
+                    }
+                } catch (error) {
+                    summary.skipped += 1
+                    summary.errorDetails.push(`Row ${rowNumber}: ${error.message}`)
+                }
+            })
+        })
+
+        applyRows(parsedRows)
+
+        res.json({
+            success: true,
+            summary: {
+                totalRows: summary.totalRows,
+                inserted: summary.inserted,
+                updated: summary.updated,
+                skipped: summary.skipped,
+                assigned: summary.assigned,
+                unassigned: summary.unassigned,
+                ignoredColumns: summary.ignoredColumns,
+                errorCount: summary.errorDetails.length,
+                errors: summary.errorDetails.slice(0, 20),
+            },
+        })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+})
+
 // ==================== CLIENT API ENDPOINTS ====================
 
 // Get client's assigned donors
@@ -925,7 +1294,6 @@ app.post('/api/clients', authenticateManager, (req, res) => {
     const name = sanitizeClientField(payload.name)
     if (!name) return res.status(400).json({ error: 'name required' })
 
-    const sheetUrl = sanitizeClientField(payload.sheet_url ?? payload.sheetUrl)
     const candidate = sanitizeClientField(payload.candidate)
     const office = sanitizeClientField(payload.office)
     const managerName = sanitizeClientField(payload.managerName ?? payload.manager_name)
@@ -945,7 +1313,6 @@ app.post('/api/clients', authenticateManager, (req, res) => {
         const stmt = db.prepare(`
             INSERT INTO clients(
                 name,
-                sheet_url,
                 candidate,
                 office,
                 manager_name,
@@ -957,11 +1324,10 @@ app.post('/api/clients', authenticateManager, (req, res) => {
                 portal_password,
                 portal_password_needs_reset
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
         `)
         const result = stmt.run(
             name,
-            sheetUrl,
             candidate,
             office,
             managerName,
@@ -993,7 +1359,6 @@ app.put('/api/clients/:clientId', authenticateManager, (req, res) => {
         return res.status(400).json({ error: 'name required' })
     }
 
-    const sheetUrl = sanitizeClientField(payload.sheet_url ?? payload.sheetUrl)
     const candidate = sanitizeClientField(payload.candidate)
     const office = sanitizeClientField(payload.office)
     const managerName = sanitizeClientField(payload.managerName ?? payload.manager_name)
@@ -1027,7 +1392,6 @@ app.put('/api/clients/:clientId', authenticateManager, (req, res) => {
         const sql = `
             UPDATE clients
             SET name = ?,
-                sheet_url = ?,
                 candidate = ?,
                 office = ?,
                 manager_name = ?,
@@ -1041,7 +1405,6 @@ app.put('/api/clients/:clientId', authenticateManager, (req, res) => {
 
         const params = [
             name,
-            sheetUrl,
             candidate,
             office,
             managerName,
