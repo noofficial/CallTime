@@ -1480,8 +1480,12 @@ app.post('/api/manager/assign-donor', authenticateManager, (req, res) => {
 
     try {
         const stmt = db.prepare(`
-            INSERT OR REPLACE INTO donor_assignments (client_id, donor_id, priority_level, assigned_by)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO donor_assignments (client_id, donor_id, priority_level, assigned_by, is_active)
+            VALUES (?, ?, ?, ?, 1)
+            ON CONFLICT(client_id, donor_id) DO UPDATE SET
+                priority_level = excluded.priority_level,
+                assigned_by = excluded.assigned_by,
+                is_active = 1
         `)
         const result = stmt.run(clientId, donorId, priority, 'manager')
 
@@ -1515,8 +1519,12 @@ app.post('/api/manager/bulk-assign', authenticateManager, (req, res) => {
 
     try {
         const stmt = db.prepare(`
-            INSERT OR REPLACE INTO donor_assignments (client_id, donor_id, priority_level, assigned_by)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO donor_assignments (client_id, donor_id, priority_level, assigned_by, is_active)
+            VALUES (?, ?, ?, ?, 1)
+            ON CONFLICT(client_id, donor_id) DO UPDATE SET
+                priority_level = excluded.priority_level,
+                assigned_by = excluded.assigned_by,
+                is_active = 1
         `)
 
         const transaction = db.transaction(() => {
