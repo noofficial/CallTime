@@ -247,9 +247,26 @@
               />
             </div>
             <div class="form-row">
+              <label class="form-label" for="client-form-password">Portal password</label>
+              <input
+                class="form-control"
+                id="client-form-password"
+                name="portalPassword"
+                type="password"
+                autocomplete="new-password"
+                placeholder="Leave blank to auto-generate"
+              />
+            </div>
+            <div class="form-row">
+              <label class="form-checkbox">
+                <input type="checkbox" id="client-form-require-password-reset" name="requirePasswordReset" />
+                <span>Require the client to choose a new password on next sign-in</span>
+              </label>
+            </div>
+            <div class="form-row">
               <div class="form-help form-help--notice">
-                Client portals start with the temporary password <strong>password</strong>. Clients must create a new password the
-                first time they sign in.
+                Client portals start with the temporary password <strong>password</strong> when no custom password is provided.
+                Clients must create a new password the first time they sign in when the password is auto-generated.
               </div>
               <button class="btn btn--sm btn--outline" type="button" id="client-reset-password">
                 Reset portal password

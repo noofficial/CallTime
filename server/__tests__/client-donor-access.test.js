@@ -1,56 +1,11 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const fs = require('node:fs')
-const os = require('node:os')
-const path = require('node:path')
 const http = require('node:http')
-const Database = require('better-sqlite3')
+const ensureIntegrationDatabase = require('../../tests/helpers/integration-db')
 
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'calltime-test-'))
-const dbPath = path.join(tmpDir, 'campaign.db')
+ensureIntegrationDatabase()
 
-const bootstrapDb = new Database(dbPath)
-bootstrapDb.exec(`
-    CREATE TABLE clients (
-        id INTEGER PRIMARY KEY,
-        name TEXT,
-        candidate TEXT,
-        portal_password TEXT,
-        portal_password_needs_reset INTEGER
-    );
-    INSERT INTO clients (id, name, candidate) VALUES (1, 'Client One', 'Candidate One');
-    CREATE TABLE donors (
-        id INTEGER PRIMARY KEY,
-        client_id INTEGER,
-        name TEXT,
-        exclusive_donor INTEGER DEFAULT 0,
-        exclusive_client_id INTEGER
-    );
-    INSERT INTO donors (id, client_id, name) VALUES
-        (101, 1, 'Assigned Donor'),
-        (102, NULL, 'Unassigned Donor'),
-        (103, 1, 'Inactive Assignment');
-    CREATE TABLE donor_assignments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        client_id INTEGER NOT NULL,
-        donor_id INTEGER NOT NULL,
-        assigned_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-        assigned_by TEXT,
-        priority_level INTEGER DEFAULT 1,
-        custom_ask_amount REAL,
-        is_active BOOLEAN DEFAULT 1,
-        assignment_notes TEXT
-    );
-    INSERT INTO donor_assignments (client_id, donor_id, is_active) VALUES (1, 101, 1);
-    INSERT INTO donor_assignments (client_id, donor_id, is_active) VALUES (1, 103, 0);
-`)
-bootstrapDb.close()
-
-process.env.NODE_ENV = 'test'
-process.env.CALLTIME_DB_PATH = dbPath
-process.env.MANAGER_PASSWORD = 'test-manager-password'
-
-const { app, ensureClientHasDonor, ClientDonorAccessError } = require('../index.js')
+const { app, ensureClientHasDonor, ClientDonorAccessError, db } = require('../index.js')
 
 let server
 let baseUrl
@@ -172,4 +127,92 @@ test('POST donor research returns 403 when donor is not assigned', async () => {
     assert.equal(response.status, 403)
     const body = await response.json()
     assert.equal(body.error, 'Donor not assigned to client')
+})
+
+test('manager can create client with custom portal password', async () => {
+    const token = await getManagerToken()
+
+    const defaultResponse = await fetch(`${baseUrl}/api/clients`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ name: 'Default Password Client', portalPassword: '', requirePasswordReset: true })
+    })
+    assert.equal(defaultResponse.status, 200)
+    const defaultBody = await defaultResponse.json()
+    const defaultRecord = db
+        .prepare('SELECT portal_password, portal_password_needs_reset FROM clients WHERE id = ?')
+        .get(defaultBody.id)
+    assert.ok(defaultRecord.portal_password)
+    assert.equal(defaultRecord.portal_password_needs_reset, 1)
+
+    const customPassword = 'SecurePass1!'
+    const customResponse = await fetch(`${baseUrl}/api/clients`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            name: 'Custom Password Client',
+            portalPassword: customPassword,
+            requirePasswordReset: false
+        })
+    })
+    assert.equal(customResponse.status, 200)
+    const customBody = await customResponse.json()
+    const customRecord = db
+        .prepare('SELECT portal_password, portal_password_needs_reset FROM clients WHERE id = ?')
+        .get(customBody.id)
+
+    assert.ok(customRecord.portal_password)
+    assert.equal(customRecord.portal_password_needs_reset, 0)
+    assert.notEqual(customRecord.portal_password, defaultRecord.portal_password)
+    assert.notEqual(customRecord.portal_password, customPassword)
+})
+
+test('manager can update client portal password without reverting to default', async () => {
+    const token = await getManagerToken()
+
+    const createResponse = await fetch(`${baseUrl}/api/clients`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ name: 'Updatable Client', portalPassword: '', requirePasswordReset: true })
+    })
+    assert.equal(createResponse.status, 200)
+    const createBody = await createResponse.json()
+
+    const originalRecord = db
+        .prepare('SELECT portal_password, portal_password_needs_reset FROM clients WHERE id = ?')
+        .get(createBody.id)
+    assert.ok(originalRecord.portal_password)
+
+    const updateResponse = await fetch(`${baseUrl}/api/clients/${createBody.id}`, {
+        method: 'PUT',
+        headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            name: 'Updatable Client',
+            portalPassword: 'UpdatedPass2#',
+            requirePasswordReset: true
+        })
+    })
+    assert.equal(updateResponse.status, 200)
+    const updateBody = await updateResponse.json()
+    assert.ok(updateBody.success)
+
+    const updatedRecord = db
+        .prepare('SELECT portal_password, portal_password_needs_reset FROM clients WHERE id = ?')
+        .get(createBody.id)
+
+    assert.ok(updatedRecord.portal_password)
+    assert.notEqual(updatedRecord.portal_password, originalRecord.portal_password)
+    assert.equal(updatedRecord.portal_password_needs_reset, 1)
 })
