@@ -79,7 +79,9 @@ const authElements = {
 
 let clientModalTrigger = null;
 
-bootstrap();
+if (typeof window === "undefined" || !window.__CALLTIME_TESTING__) {
+  bootstrap();
+}
 
 function bootstrap() {
   bindAuthEvents();
@@ -606,7 +608,10 @@ function renderDonors() {
   if (!container) return;
   container.innerHTML = "";
   if (!state.filteredDonors.length) {
-    container.innerHTML = `<p class="muted">No donors match the current search.</p>`;
+    const message = document.createElement("p");
+    message.className = "muted";
+    message.textContent = "No donors match the current search.";
+    container.append(message);
     return;
   }
 
@@ -627,21 +632,50 @@ function renderDonors() {
       ? donor.assigned_clients.split(",").map((item) => item.trim()).filter(Boolean)
       : [];
 
-    row.innerHTML = `
-      <div class="donor-info">
-        <div class="donor-name">${name}</div>
-        <div class="donor-details">
-          ${company ? `${company}` : "Unknown employer"}
-          ${addressSummary ? ` • ${addressSummary}` : ""}
-          ${capacity ? ` • Capacity: $${Number(capacity).toLocaleString()}` : ""}
-        </div>
-        <div class="donor-tags">${renderTags(donor.tags)}</div>
-      </div>
-      <div class="donor-actions">
-        <span class="status status--info">${assignments.length} assigned</span>
-        <button class="btn btn--sm btn--danger" data-delete-donor-id="${donor.id}">Delete</button>
-      </div>
-    `;
+    const info = document.createElement("div");
+    info.className = "donor-info";
+
+    const nameEl = document.createElement("div");
+    nameEl.className = "donor-name";
+    nameEl.textContent = name;
+    info.append(nameEl);
+
+    const details = document.createElement("div");
+    details.className = "donor-details";
+    const detailParts = [];
+    detailParts.push(company ? company : "Unknown employer");
+    if (addressSummary) {
+      detailParts.push(addressSummary);
+    }
+    if (capacity) {
+      detailParts.push(`Capacity: $${Number(capacity).toLocaleString()}`);
+    }
+    details.textContent = detailParts.filter(Boolean).join(" • ");
+    info.append(details);
+
+    const tagsContainer = document.createElement("div");
+    tagsContainer.className = "donor-tags";
+    const tags = renderTags(donor.tags);
+    if (tags) {
+      tagsContainer.innerHTML = tags;
+    }
+    info.append(tagsContainer);
+
+    const actions = document.createElement("div");
+    actions.className = "donor-actions";
+
+    const statusPill = document.createElement("span");
+    statusPill.className = "status status--info";
+    statusPill.textContent = `${assignments.length} assigned`;
+    actions.append(statusPill);
+
+    const deleteButton = document.createElement("button");
+    deleteButton.className = "btn btn--sm btn--danger";
+    deleteButton.dataset.deleteDonorId = String(donor.id);
+    deleteButton.textContent = "Delete";
+    actions.append(deleteButton);
+
+    row.append(info, actions);
 
     if (assignments.length) {
       const list = document.createElement("ul");
@@ -654,12 +688,10 @@ function renderDonors() {
       row.querySelector(".donor-actions")?.append(list);
     }
 
-    row
-      .querySelector("[data-delete-donor-id]")
-      ?.addEventListener("click", (event) => {
-        event.stopPropagation();
-        handleDeleteDonor(donor.id);
-      });
+    deleteButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      handleDeleteDonor(donor.id);
+    });
 
     container.append(row);
   });
@@ -667,15 +699,14 @@ function renderDonors() {
 
 function renderTags(raw) {
   if (!raw) return "";
-  if (Array.isArray(raw)) {
-    return raw.map((tag) => `<span class="tag">${tag}</span>`).join(" ");
-  }
-  return String(raw)
-    .split(",")
-    .map((tag) => tag.trim())
-    .filter(Boolean)
-    .map((tag) => `<span class="tag">${tag}</span>`)
-    .join(" ");
+  const tags = Array.isArray(raw)
+    ? raw
+    : String(raw)
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean);
+  if (!tags.length) return "";
+  return tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join(" ");
 }
 
 function populateAssignmentSelect() {
@@ -739,12 +770,18 @@ function renderAssignmentLists() {
   }
 
   if (!state.selectedClientId) {
-    assignedContainer.innerHTML = `<p class="muted">Select a client to manage assignments.</p>`;
+    const message = document.createElement("p");
+    message.className = "muted";
+    message.textContent = "Select a client to manage assignments.";
+    assignedContainer.append(message);
     return;
   }
 
   if (state.loadingAssignments) {
-    assignedContainer.innerHTML = `<p class="muted">Loading assignments…</p>`;
+    const message = document.createElement("p");
+    message.className = "muted";
+    message.textContent = "Loading assignments…";
+    assignedContainer.append(message);
     return;
   }
 
@@ -756,7 +793,10 @@ function renderAssignmentLists() {
   const unassignedList = state.donors.filter((donor) => !assignedIds.has(String(donor.id)));
 
   if (!unassignedList.length) {
-    availableContainer.innerHTML = `<p class="muted">All donors are currently assigned.</p>`;
+    const message = document.createElement("p");
+    message.className = "muted";
+    message.textContent = "All donors are currently assigned.";
+    availableContainer.append(message);
   } else {
     unassignedList.forEach((donor) => {
       availableContainer.append(renderAssignmentCard(donor, "assign"));
@@ -764,7 +804,10 @@ function renderAssignmentLists() {
   }
 
   if (!assignedList.length) {
-    assignedContainer.innerHTML = `<p class="muted">No donors assigned yet.</p>`;
+    const message = document.createElement("p");
+    message.className = "muted";
+    message.textContent = "No donors assigned yet.";
+    assignedContainer.append(message);
   } else {
     assignedContainer.innerHTML = "";
     assignedList.forEach((donor) => {
@@ -774,8 +817,11 @@ function renderAssignmentLists() {
 }
 
 function removeClientLocally(clientId) {
+  console.log("Removing client locally", clientId);
   const targetId = String(clientId);
+  console.log("Before filter, clients length", state.clients.length);
   state.clients = state.clients.filter((client) => String(client.id) !== targetId);
+  console.log("After filter, clients length", state.clients.length);
 
   if (String(state.selectedClientId) === targetId) {
     state.selectedClientId = "";
@@ -817,8 +863,12 @@ async function handleDeleteClient(clientId) {
   );
   if (!confirmed) return;
 
+  console.log("Deleting client", clientId);
+
   try {
+    console.log("Sending DELETE request to server");
     const response = await managerFetch(`/api/clients/${clientId}`, { method: "DELETE" });
+    console.log("Response received", response.ok, response.status);
     if (!response.ok) throw new Error("Unable to delete client");
 
     removeClientLocally(clientId);
@@ -830,7 +880,8 @@ async function handleDeleteClient(clientId) {
     }
     await Promise.all(refreshTasks);
   } catch (error) {
-    reportError(error);
+    console.error(error);
+    alert(error.message || "An unexpected error occurred.");
   }
 }
 
@@ -842,6 +893,8 @@ async function handleDeleteDonor(donorId) {
     `Delete ${name}? This will remove the donor and all related history. This action cannot be undone.`,
   );
   if (!confirmed) return;
+
+  console.log("Deleting donor", donorId);
 
   try {
     const response = await managerFetch(`/api/donors/${donorId}`, { method: "DELETE" });
@@ -856,20 +909,24 @@ async function handleDeleteDonor(donorId) {
     }
     await Promise.all(refreshTasks);
   } catch (error) {
-    reportError(error);
+    console.error(error);
+    alert(error.message || "An unexpected error occurred.");
   }
 }
 
 function renderAssignmentCard(donor, mode) {
   const card = document.createElement("div");
   card.className = `assignable-donor${mode === "unassign" ? " assigned" : ""}`;
-  card.setAttribute("data-donor-id", donor.id);
+  card.dataset.donorId = String(donor.id);
   const name = donor.name || `${donor.first_name || ""} ${donor.last_name || ""}`.trim() || "Unnamed donor";
   const company = donor.company || donor.employer || "";
-  card.innerHTML = `
-    <div class="donor-name">${name}</div>
-    <div class="donor-details">${company || "No employer on file"}</div>
-  `;
+  const nameEl = document.createElement("div");
+  nameEl.className = "donor-name";
+  nameEl.textContent = name;
+  const detailsEl = document.createElement("div");
+  detailsEl.className = "donor-details";
+  detailsEl.textContent = company || "No employer on file";
+  card.append(nameEl, detailsEl);
   return card;
 }
 
@@ -1669,3 +1726,13 @@ function formatFundraisingGoal(value) {
   }
   return `$${numeric.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
+
+export const __TESTING__ = {
+  state,
+  elements,
+  renderDonors,
+  renderTags,
+  renderAssignmentLists,
+  renderAssignmentCard,
+  escapeHtml,
+};

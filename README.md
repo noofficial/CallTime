@@ -45,9 +45,15 @@ dependencies before restarting the server.
 
 The manager workspace and client portal now require passwords.
 
-- **Manager access:** the dashboard ships with a built-in password of
-  `10231972Fn*`. You can override it by setting `MANAGER_PASSWORD` or supply a
-  precomputed PBKDF2 hash via `MANAGER_PASSWORD_HASH` when starting the API.
+- **Manager access:** before starting the API you must set either
+  `MANAGER_PASSWORD` or a precomputed PBKDF2 hash via `MANAGER_PASSWORD_HASH`.
+  The legacy built-in password of `10231972Fn*` is only loaded automatically
+  when `NODE_ENV` is set to `test` for automated suites; otherwise the server
+  will refuse to boot without one of the environment variables configured.
+  You can place these credentials in a `.env` file in the project root (for
+  example, `MANAGER_PASSWORD=super-secret`) and they will be loaded
+  automatically when the server starts. Values in the environment override the
+  `.env` file so production deployments can set secrets directly.
 
 - **Client access:** new campaigns are provisioned with the temporary password
   `password`. Fundraisers select their campaign from the login list, enter the

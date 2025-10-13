@@ -22,7 +22,9 @@ bootstrapDb.exec(`
     CREATE TABLE donors (
         id INTEGER PRIMARY KEY,
         client_id INTEGER,
-        name TEXT
+        name TEXT,
+        exclusive_donor INTEGER DEFAULT 0,
+        exclusive_client_id INTEGER
     );
     INSERT INTO donors (id, client_id, name) VALUES
         (101, 1, 'Assigned Donor'),
@@ -46,6 +48,7 @@ bootstrapDb.close()
 
 process.env.NODE_ENV = 'test'
 process.env.CALLTIME_DB_PATH = dbPath
+process.env.MANAGER_PASSWORD = 'test-manager-password'
 
 const { app, ensureClientHasDonor, ClientDonorAccessError } = require('../index.js')
 
@@ -56,7 +59,7 @@ const getManagerToken = async () => {
     const response = await fetch(`${baseUrl}/api/auth/manager-login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: '10231972Fn*' })
+        body: JSON.stringify({ password: 'test-manager-password' })
     })
     assert.equal(response.status, 200)
     const body = await response.json()

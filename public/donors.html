@@ -227,6 +227,21 @@
                 </div>
                 <button class="btn btn--ghost" type="button" id="select-all-clients">Select all</button>
               </div>
+              <div class="form-grid">
+                <div class="form-row">
+                  <label class="form-label" for="editor-exclusive-toggle">Exclusive donor</label>
+                  <select class="input select" id="editor-exclusive-toggle" name="exclusiveDonor">
+                    <option value="no">No — allow multiple campaigns</option>
+                    <option value="yes">Yes — lock to a single campaign</option>
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="editor-exclusive-client">Locked campaign</label>
+                  <select class="input select" id="editor-exclusive-client" name="exclusiveClientId" disabled>
+                    <option value="">Select a campaign</option>
+                  </select>
+                </div>
+              </div>
               <div id="editor-client-assignments" class="assignment-grid"></div>
             </section>
 

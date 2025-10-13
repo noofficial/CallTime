@@ -239,6 +239,11 @@ function normalizeDonorSummary(donor) {
     pictureUrl: donor.photo_url || "",
     assignedClientIds: parseAssignedIds(donor.assigned_client_ids),
     assignedLabel: donor.assigned_clients || "",
+    exclusiveDonor: Boolean(Number(donor.exclusive_donor || donor.exclusiveDonor || 0)),
+    exclusiveClientId:
+      donor.exclusive_client_id != null && donor.exclusive_client_id !== ""
+        ? String(donor.exclusive_client_id)
+        : "",
   };
 }
 
@@ -700,6 +705,8 @@ function createDraftFromDonor(donor) {
       notes: donor.notes || "",
       biography: donor.biography || "",
       pictureUrl: donor.pictureUrl || "",
+      exclusiveDonor: donor.exclusiveDonor ? "yes" : "no",
+      exclusiveClientId: donor.exclusiveClientId || "",
     },
     history,
   };
@@ -945,7 +952,14 @@ function createTextareaField(id, name, label, value, rows = 4) {
 
 function handleInlineInput(event, donor, nameHeading, metaElement) {
   const target = event.target;
-  if (!target || !(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
+  if (
+    !target ||
+    !(
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement
+    )
+  ) {
     return;
   }
   if (!state.detailDraft || state.detailDraft.id !== donor.id) {
@@ -994,6 +1008,8 @@ async function handleInlineSubmit(donor) {
     notes: values.notes.trim(),
     biography: values.biography.trim(),
     pictureUrl: values.pictureUrl.trim(),
+    exclusiveDonor: values.exclusiveDonor === "yes",
+    exclusiveClientId: values.exclusiveClientId || null,
   };
 
   try {
@@ -1006,24 +1022,28 @@ async function handleInlineSubmit(donor) {
     const normalized = normalizeDonorDetail(updated);
     state.donorDetails.set(donor.id, normalized);
     state.detailDraft = createDraftFromDonor(normalized);
-    state.detailStatus = { donorId: donor.id, message: "Saved just now" };
-    if (state.detailStatusTimeout) {
-      clearTimeout(state.detailStatusTimeout);
-    }
-    state.detailStatusTimeout = window.setTimeout(() => {
-      if (state.detailStatus && state.detailStatus.donorId === donor.id) {
-        state.detailStatus = null;
-        const statusNode = elements.detail?.querySelector("[data-status]");
-        if (statusNode) {
-          statusNode.textContent = "";
-        }
-      }
-      state.detailStatusTimeout = null;
-    }, 3000);
+    queueDetailStatus(donor.id, "Saved just now");
     await refreshData({ donorId: donor.id, preserveDraft: true, skipClients: true });
   } catch (error) {
     console.error("Failed to update donor", error);
   }
+}
+
+function queueDetailStatus(donorId, message, duration = 3000) {
+  state.detailStatus = { donorId, message };
+  if (state.detailStatusTimeout) {
+    clearTimeout(state.detailStatusTimeout);
+  }
+  state.detailStatusTimeout = window.setTimeout(() => {
+    if (state.detailStatus && state.detailStatus.donorId === donorId) {
+      state.detailStatus = null;
+      const statusNode = elements.detail?.querySelector("[data-status]");
+      if (statusNode) {
+        statusNode.textContent = "";
+      }
+    }
+    state.detailStatusTimeout = null;
+  }, duration);
 }
 
 function createAssignmentSection(donor) {
@@ -1048,6 +1068,10 @@ function createAssignmentSection(donor) {
       const chip = document.createElement("span");
       chip.className = "donor-assignment__chip";
       chip.textContent = client.label || client.candidate || "Unnamed candidate";
+      if (donor.exclusiveDonor && donor.exclusiveClientId === client.id) {
+        chip.dataset.exclusive = "true";
+        chip.textContent = `${chip.textContent} (exclusive)`;
+      }
       chips.append(chip);
     });
   } else {
@@ -1057,6 +1081,73 @@ function createAssignmentSection(donor) {
     chips.append(emptyChip);
   }
   section.append(chips);
+
+  const draftValues =
+    state.detailDraft && state.detailDraft.id === donor.id ? state.detailDraft.values : null;
+  const exclusiveValue =
+    draftValues && typeof draftValues.exclusiveDonor === "string"
+      ? draftValues.exclusiveDonor === "yes"
+      : Boolean(donor.exclusiveDonor);
+  const exclusiveClientId =
+    draftValues && draftValues.exclusiveClientId !== undefined
+      ? draftValues.exclusiveClientId || ""
+      : donor.exclusiveClientId || "";
+
+  const exclusivityGrid = document.createElement("div");
+  exclusivityGrid.className = "form-grid donor-assignment__exclusive";
+
+  const toggleWrapper = document.createElement("div");
+  toggleWrapper.className = "form-row";
+  const toggleLabel = document.createElement("label");
+  toggleLabel.className = "form-label";
+  toggleLabel.setAttribute("for", "inline-exclusive-toggle");
+  toggleLabel.textContent = "Exclusive donor";
+  const toggleSelect = document.createElement("select");
+  toggleSelect.className = "input select";
+  toggleSelect.id = "inline-exclusive-toggle";
+  toggleSelect.name = "exclusiveDonor";
+  const allowOption = document.createElement("option");
+  allowOption.value = "no";
+  allowOption.textContent = "No — allow multiple campaigns";
+  const lockOption = document.createElement("option");
+  lockOption.value = "yes";
+  lockOption.textContent = "Yes — lock to a single campaign";
+  toggleSelect.append(allowOption, lockOption);
+  toggleSelect.value = exclusiveValue ? "yes" : "no";
+  toggleWrapper.append(toggleLabel, toggleSelect);
+
+  const clientWrapper = document.createElement("div");
+  clientWrapper.className = "form-row";
+  const clientLabel = document.createElement("label");
+  clientLabel.className = "form-label";
+  clientLabel.setAttribute("for", "inline-exclusive-client");
+  clientLabel.textContent = "Locked campaign";
+  const clientSelect = document.createElement("select");
+  clientSelect.className = "input select";
+  clientSelect.id = "inline-exclusive-client";
+  clientSelect.name = "exclusiveClientId";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = state.clients.length ? "Select a campaign" : "No campaigns available";
+  placeholder.disabled = state.clients.length > 0;
+  placeholder.hidden = state.clients.length > 0;
+  clientSelect.append(placeholder);
+  state.clients.forEach((client) => {
+    const option = document.createElement("option");
+    option.value = client.id;
+    option.textContent = client.label || client.candidate || "Unnamed candidate";
+    clientSelect.append(option);
+  });
+  if (exclusiveClientId && state.clients.some((client) => client.id === exclusiveClientId)) {
+    clientSelect.value = exclusiveClientId;
+  }
+  if (!exclusiveValue) {
+    clientSelect.setAttribute("disabled", "true");
+  }
+  clientWrapper.append(clientLabel, clientSelect);
+
+  exclusivityGrid.append(toggleWrapper, clientWrapper);
+  section.append(exclusivityGrid);
 
   const options = document.createElement("div");
   options.className = "assignment-grid";
@@ -1073,9 +1164,13 @@ function createAssignmentSection(donor) {
       input.type = "checkbox";
       input.value = client.id;
       input.checked = assigned.has(client.id);
-      input.addEventListener("change", (event) => {
-        void toggleAssignment(donor.id, client.id, event.target.checked);
-      });
+      if (exclusiveValue) {
+        input.setAttribute("disabled", "true");
+      } else {
+        input.addEventListener("change", (event) => {
+          void toggleAssignment(donor.id, client.id, event.target.checked);
+        });
+      }
       const name = document.createElement("span");
       name.textContent = client.label || client.candidate || "Unnamed candidate";
       label.append(input, name);
@@ -1083,11 +1178,77 @@ function createAssignmentSection(donor) {
     });
   }
   section.append(options);
+
+  toggleSelect.addEventListener("change", async (event) => {
+    const shouldLock = event.target.value === "yes";
+    if (state.detailDraft && state.detailDraft.id === donor.id) {
+      state.detailDraft.values.exclusiveDonor = shouldLock ? "yes" : "no";
+    }
+    if (shouldLock) {
+      if (!state.clients.length) {
+        event.target.value = "no";
+        queueDetailStatus(donor.id, "Add a campaign before locking this donor.", 4000);
+        return;
+      }
+      let targetClient = clientSelect.value || exclusiveClientId;
+      if (!targetClient) {
+        const assignedClient = assigned.size ? [...assigned][0] : "";
+        targetClient = assignedClient || (state.clients[0]?.id || "");
+      }
+      if (!targetClient) {
+        event.target.value = "no";
+        queueDetailStatus(donor.id, "Select a campaign to lock this donor.", 4000);
+        return;
+      }
+      clientSelect.removeAttribute("disabled");
+      clientSelect.value = targetClient;
+      if (state.detailDraft && state.detailDraft.id === donor.id) {
+        state.detailDraft.values.exclusiveClientId = targetClient;
+      }
+      await changeDonorExclusivity(donor, {
+        exclusiveDonor: true,
+        exclusiveClientId: targetClient,
+      });
+    } else {
+      clientSelect.setAttribute("disabled", "true");
+      if (state.detailDraft && state.detailDraft.id === donor.id) {
+        state.detailDraft.values.exclusiveClientId = "";
+      }
+      await changeDonorExclusivity(donor, { exclusiveDonor: false, exclusiveClientId: null });
+    }
+  });
+
+  clientSelect.addEventListener("change", async (event) => {
+    const value = event.target.value;
+    if (!value) {
+      return;
+    }
+    if (state.detailDraft && state.detailDraft.id === donor.id) {
+      state.detailDraft.values.exclusiveDonor = "yes";
+      state.detailDraft.values.exclusiveClientId = value;
+    }
+    await changeDonorExclusivity(donor, { exclusiveDonor: true, exclusiveClientId: value });
+  });
+
   return section;
 }
 
 async function toggleAssignment(donorId, clientId, shouldAssign) {
   try {
+    const detail = state.donorDetails.get(donorId);
+    const exclusiveClientId = detail?.exclusiveClientId || "";
+    const isExclusive = Boolean(detail?.exclusiveDonor);
+    const clientKey = String(clientId);
+    if (isExclusive) {
+      if (shouldAssign && exclusiveClientId && exclusiveClientId !== clientKey) {
+        queueDetailStatus(donorId, "This donor is locked to another campaign.", 4000);
+        return;
+      }
+      if (!shouldAssign && exclusiveClientId && exclusiveClientId === clientKey) {
+        queueDetailStatus(donorId, "Unlock this donor before removing the assignment.", 4000);
+        return;
+      }
+    }
     if (shouldAssign) {
       await fetchJson("/api/manager/assign-donor", {
         method: "POST",
@@ -1100,6 +1261,30 @@ async function toggleAssignment(donorId, clientId, shouldAssign) {
     await refreshData({ donorId, preserveDraft: true });
   } catch (error) {
     console.error("Failed to update assignment", error);
+    queueDetailStatus(donorId, "We couldn't update this assignment.", 4000);
+  }
+}
+
+async function changeDonorExclusivity(donor, { exclusiveDonor, exclusiveClientId }) {
+  try {
+    const payload = {
+      exclusiveDonor,
+      exclusiveClientId: exclusiveClientId === undefined ? null : exclusiveClientId,
+    };
+    await fetchJson(`/api/donors/${donor.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const message = exclusiveDonor
+      ? "Locked to selected campaign"
+      : "Exclusive lock removed";
+    queueDetailStatus(donor.id, message);
+    await refreshData({ donorId: donor.id, preserveDraft: true, forceDetail: true });
+  } catch (error) {
+    console.error("Failed to update exclusivity", error);
+    queueDetailStatus(donor.id, "We couldn't update exclusivity.", 4000);
+    await refreshData({ donorId: donor.id, preserveDraft: true, forceDetail: true });
   }
 }
 
@@ -1403,12 +1588,14 @@ async function handleDeleteDonor(donorId) {
     `Delete ${name}? This will remove the donor and all related history. This action cannot be undone.`,
   );
   if (!confirmed) return;
+  console.log("Deleting donor", donorId);
   try {
     await fetchJson(`/api/donors/${donorId}`, { method: "DELETE" });
     state.donorDetails.delete(donorId);
     await refreshData({ donorId: null, preserveDraft: false });
   } catch (error) {
     console.error("Failed to delete donor", error);
+    alert("Failed to delete donor: " + (error.message || "Unknown error"));
   }
 }
 
