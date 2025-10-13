@@ -226,7 +226,11 @@ export class CallTimeDatabase {
     donor.history.push(contribution);
     donor.history.sort((a, b) => {
       if (a.year === b.year) {
-        return a.candidate.localeCompare(b.candidate);
+        const candidateCompare = (a.candidate || "").localeCompare(b.candidate || "");
+        if (candidateCompare !== 0) {
+          return candidateCompare;
+        }
+        return (a.officeSought || "").localeCompare(b.officeSought || "");
       }
       return (b.year || 0) - (a.year || 0);
     });
@@ -296,7 +300,7 @@ export class CallTimeDatabase {
   }
 
   createContributionId(entry = {}) {
-    const base = [entry.year, entry.candidate, entry.amount]
+    const base = [entry.year, entry.candidate, entry.officeSought, entry.amount]
       .filter(Boolean)
       .join("-");
     return CallTimeDatabase.createId(base || `contribution-${Date.now()}`);
@@ -333,7 +337,35 @@ export class CallTimeDatabase {
       pictureUrl: pictureUrl.trim(),
       donorNotes: (source.donorNotes || source.notes || source.Notes || "").trim(),
       ask,
+      street: (
+        source.street ||
+        source.Street ||
+        source.address ||
+        source.Address ||
+        source["Mailing Street"] ||
+        source["Address 1"] ||
+        ""
+      ).trim(),
+      addressLine2: (
+        source.addressLine2 ||
+        source.AddressLine2 ||
+        source.address2 ||
+        source.Address2 ||
+        source["Mailing Address Line 2"] ||
+        ""
+      ).trim(),
       city: (source.city || source.City || source["Mailing City"] || "").trim(),
+      state: (source.state || source.State || source["Mailing State"] || "").trim(),
+      postalCode: (
+        source.postalCode ||
+        source.PostalCode ||
+        source.zip ||
+        source.Zip ||
+        source["ZIP"] ||
+        source["Zip Code"] ||
+        source["Postal Code"] ||
+        ""
+      ).trim(),
       tags: (source.tags || source.Tags || source.Priority || "").trim(),
       lastGift: (source.lastGift || source["Last Gift"] || source["Giving History"] || "").trim(),
       history,
@@ -351,6 +383,15 @@ export class CallTimeDatabase {
     const yearValue = Number(source.year ?? source.Year ?? source["Election Year"]);
     const candidate = (source.candidate || source.Candidate || "").trim();
     const amount = this.parseNumber(source.amount ?? source.Amount ?? source["Contribution"]);
+    const office =
+      (source.office ||
+        source.Office ||
+        source.officeSought ||
+        source.office_sought ||
+        source["Office Sought"] ||
+        "")
+        .toString()
+        .trim();
     if (!candidate && Number.isNaN(yearValue) && (amount === null || Number.isNaN(amount))) {
       return null;
     }
@@ -360,6 +401,7 @@ export class CallTimeDatabase {
       year,
       candidate,
       amount,
+      officeSought: office,
     };
   }
 

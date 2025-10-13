@@ -43,15 +43,42 @@ const DONOR_COLUMN_MAP = new Map([
     ['cell', 'phone'],
     ['email', 'email'],
     ['emailaddress', 'email'],
+    ['street', 'street_address'],
+    ['address', 'street_address'],
+    ['address1', 'street_address'],
+    ['addressline1', 'street_address'],
+    ['addressline2', 'address_line2'],
+    ['address2', 'address_line2'],
+    ['line2', 'address_line2'],
+    ['fulladdress', 'full_address'],
+    ['completeaddress', 'full_address'],
+    ['mailingaddress', 'full_address'],
+    ['fullmailingaddress', 'full_address'],
+    ['mailingaddressline', 'full_address'],
+    ['addressfull', 'full_address'],
     ['city', 'city'],
     ['town', 'city'],
+    ['citystatezip', 'city_state_postal'],
+    ['citystatezipcode', 'city_state_postal'],
+    ['citystatepostalcode', 'city_state_postal'],
+    ['citystatepostal', 'city_state_postal'],
+    ['citystate', 'city_state_postal'],
+    ['state', 'state'],
+    ['province', 'state'],
+    ['region', 'state'],
+    ['zipcode', 'postal_code'],
+    ['zip', 'postal_code'],
+    ['postalcode', 'postal_code'],
+    ['postal', 'postal_code'],
     ['employer', 'employer'],
     ['company', 'employer'],
     ['organization', 'employer'],
     ['workplace', 'employer'],
     ['occupation', 'occupation'],
-    ['jobtitle', 'occupation'],
     ['profession', 'occupation'],
+    ['title', 'job_title'],
+    ['jobtitle', 'job_title'],
+    ['position', 'job_title'],
     ['bio', 'bio'],
     ['biography', 'bio'],
     ['notes', 'notes'],
@@ -80,7 +107,7 @@ const DONOR_COLUMN_MAP = new Map([
 
 const CONTRIBUTION_PREFIXES = ['contribution', 'giving', 'donation', 'gift']
 const CONTRIBUTION_FIELD_PATTERN = new RegExp(
-    `^(?:${CONTRIBUTION_PREFIXES.join('|')})(\\d*)(year|candidate|amount)$`
+    `^(?:${CONTRIBUTION_PREFIXES.join('|')})(\\d*)(year|candidate|amount|office|officesought)$`
 )
 
 const identifyContributionField = (normalizedKey) => {
@@ -89,7 +116,8 @@ const identifyContributionField = (normalizedKey) => {
     const match = normalizedKey.match(CONTRIBUTION_FIELD_PATTERN)
     if (!match) return null
 
-    const [, slotDigits, field] = match
+    const [, slotDigits, rawField] = match
+    const field = rawField === 'officesought' ? 'office' : rawField
     const slot = slotDigits || 'default'
     return { slot, field }
 }
@@ -175,6 +203,184 @@ const parseCurrency = (value) => {
     return null
 }
 
+const parseCityStatePostal = (value) => {
+    const cleaned = cleanString(value)
+    if (!cleaned) return null
+
+    const match = cleaned.match(/^(?<city>.+?)[,\s]+(?<state>[A-Za-z]{2})(?:\s+(?<postal>\d{5}(?:-\d{4})?))?$/)
+    if (!match || !match.groups) return null
+
+    const city = cleanString(match.groups.city)
+    const state = cleanString(match.groups.state)
+    const postal = cleanString(match.groups.postal)
+
+    return {
+        city: city || null,
+        state: state || null,
+        postal_code: postal || null,
+    }
+}
+
+const parseAddressFromSingleCell = (value) => {
+    if (value === undefined || value === null) return {}
+    const raw = typeof value === 'string' ? value : String(value)
+    const normalized = raw.replace(/\r/g, '\n').trim()
+    if (!normalized) return {}
+
+    let remainder = normalized
+    let city = null
+    let state = null
+    let postal_code = null
+
+    const tailMatch = remainder.match(/(?:^|[\n,])\s*(?<city>[A-Za-z0-9.'\- ]+?)\s*,?\s*(?<state>[A-Za-z]{2})(?:\s+(?<postal>\d{5}(?:-\d{4})?))?\s*$/)
+    if (tailMatch && tailMatch.groups) {
+        city = cleanString(tailMatch.groups.city) || null
+        state = cleanString(tailMatch.groups.state) || null
+        postal_code = cleanString(tailMatch.groups.postal) || null
+        const matchedText = tailMatch[0]
+        const trimmedMatch = matchedText.replace(/^[,\s\n]+/, '')
+        const index = remainder.lastIndexOf(trimmedMatch)
+        if (index !== -1) {
+            remainder = remainder.slice(0, index)
+        } else {
+            remainder = remainder.replace(matchedText, '')
+        }
+        remainder = remainder.trim().replace(/[,\s]+$/, '').trim()
+    }
+
+    const segments = remainder
+        .split(/\n+/)
+        .map((segment) => segment.trim())
+        .filter(Boolean)
+
+    let street_address = null
+    let address_line2 = null
+
+    if (segments.length) {
+        street_address = segments.shift() || null
+        if (segments.length) {
+            address_line2 = segments.join(', ') || null
+        }
+    }
+
+    if (!street_address && remainder) {
+        const parts = remainder
+            .split(',')
+            .map((part) => part.trim())
+            .filter(Boolean)
+        if (parts.length) {
+            street_address = parts.shift() || null
+            if (parts.length) {
+                const rest = parts.join(', ')
+                if (rest) {
+                    address_line2 = address_line2 ? `${address_line2}, ${rest}` : rest
+                }
+            }
+        }
+    }
+
+    if (!street_address && remainder) {
+        street_address = remainder
+    }
+
+    return {
+        street_address: cleanString(street_address),
+        address_line2: cleanString(address_line2),
+        city: city,
+        state: state,
+        postal_code: postal_code,
+    }
+}
+
+const deriveAddressFields = (row) => {
+    const originalStreet = row.street_address
+    const originalLine2 = row.address_line2
+
+    let street_address = cleanString(originalStreet)
+    let address_line2 = cleanString(originalLine2)
+    let city = cleanString(row.city)
+    let state = cleanString(row.state)
+    let postal_code = cleanString(row.postal_code)
+
+    const applyParsed = (parsed) => {
+        if (!parsed || typeof parsed !== 'object') return
+        if (parsed.street_address && (!street_address || street_address === cleanString(originalStreet))) {
+            street_address = parsed.street_address
+        } else if (!street_address && parsed.street_address) {
+            street_address = parsed.street_address
+        }
+        if (!address_line2 && parsed.address_line2) {
+            address_line2 = parsed.address_line2
+        }
+        if (!city && parsed.city) {
+            city = parsed.city
+        }
+        if (!state && parsed.state) {
+            state = parsed.state
+        }
+        if (!postal_code && parsed.postal_code) {
+            postal_code = parsed.postal_code
+        }
+    }
+
+    const combinedCityStatePostal = parseCityStatePostal(row.city_state_postal)
+    if (combinedCityStatePostal) {
+        if (!city && combinedCityStatePostal.city) {
+            city = combinedCityStatePostal.city
+        }
+        if (!state && combinedCityStatePostal.state) {
+            state = combinedCityStatePostal.state
+        }
+        if (!postal_code && combinedCityStatePostal.postal_code) {
+            postal_code = combinedCityStatePostal.postal_code
+        }
+    }
+
+    const fullAddressSources = []
+    if (hasValue(row.full_address)) {
+        fullAddressSources.push(row.full_address)
+    }
+    if (hasValue(row.street_address)) {
+        fullAddressSources.push(row.street_address)
+    }
+
+    fullAddressSources.forEach((value) => {
+        const parsed = parseAddressFromSingleCell(value)
+        applyParsed(parsed)
+    })
+
+    if (!city || !state || !postal_code) {
+        const parsedLine2 = parseCityStatePostal(address_line2)
+        if (parsedLine2) {
+            if (!city && parsedLine2.city) {
+                city = parsedLine2.city
+            }
+            if (!state && parsedLine2.state) {
+                state = parsedLine2.state
+            }
+            if (!postal_code && parsedLine2.postal_code) {
+                postal_code = parsedLine2.postal_code
+            }
+            const originalLine2Normalized = cleanString(originalLine2)
+            if (originalLine2Normalized) {
+                const compactOriginal = originalLine2Normalized.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+                const compactParsed = [parsedLine2.city, parsedLine2.state, parsedLine2.postal_code]
+                    .filter(Boolean)
+                    .join(' ')
+                const normalizedParsed = cleanString(compactParsed)
+                const compactParsedNormalized = normalizedParsed
+                    ? normalizedParsed.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+                    : ''
+                if (compactParsedNormalized && compactOriginal === compactParsedNormalized) {
+                    address_line2 = null
+                }
+            }
+        }
+    }
+
+    return { street_address, address_line2, city, state, postal_code }
+}
+
 const transformContributionRows = (rows = []) => {
     const entries = []
     const errors = []
@@ -185,6 +391,7 @@ const transformContributionRows = (rows = []) => {
         const year = parseInteger(row.year)
         const candidate = cleanString(row.candidate)
         const amount = parseCurrency(row.amount)
+        const officeSought = cleanString(row.office ?? row.office_sought ?? row.officeSought)
 
         if (year === null && !candidate && amount === null) {
             return
@@ -199,7 +406,7 @@ const transformContributionRows = (rows = []) => {
             return
         }
 
-        entries.push({ year, candidate, amount })
+        entries.push({ year, candidate, amount, officeSought })
     })
 
     return { entries, errors }
@@ -269,6 +476,8 @@ const transformDonorRow = (row, fallbackClientId, clientLookup) => {
         return { error: 'Unknown client assignment' }
     }
 
+    const address = deriveAddressFields(row)
+
     const donor = {
         client_id: resolvedClientId ?? null,
         name,
@@ -276,9 +485,14 @@ const transformDonorRow = (row, fallbackClientId, clientLookup) => {
         last_name: lastName,
         phone: cleanString(row.phone),
         email: cleanString(row.email),
-        city: cleanString(row.city),
+        street_address: address.street_address,
+        address_line2: address.address_line2,
+        city: address.city,
+        state: address.state,
+        postal_code: address.postal_code,
         employer: cleanString(row.employer),
         occupation: cleanString(row.occupation),
+        job_title: cleanString(row.job_title),
         tags: cleanString(row.tags),
         suggested_ask: parseSuggestedAsk(row.suggested_ask),
         last_gift_note: cleanString(row.last_gift_note),
@@ -601,6 +815,7 @@ const enhanceSchema = () => {
                 donor_id INTEGER NOT NULL,
                 year INTEGER NOT NULL,
                 candidate TEXT NOT NULL,
+                office_sought TEXT,
                 amount REAL NOT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(donor_id) REFERENCES donors(id) ON DELETE CASCADE
@@ -649,6 +864,11 @@ const enhanceSchema = () => {
         `)
         ensureColumn('donors', 'first_name', 'first_name TEXT')
         ensureColumn('donors', 'last_name', 'last_name TEXT')
+        ensureColumn('donors', 'job_title', 'job_title TEXT')
+        ensureColumn('donors', 'street_address', 'street_address TEXT')
+        ensureColumn('donors', 'address_line2', 'address_line2 TEXT')
+        ensureColumn('donors', 'state', 'state TEXT')
+        ensureColumn('donors', 'postal_code', 'postal_code TEXT')
         ensureColumn('donors', 'notes', 'notes TEXT')
         ensureColumn('clients', 'candidate', 'candidate TEXT')
         ensureColumn('clients', 'office', 'office TEXT')
@@ -660,6 +880,7 @@ const enhanceSchema = () => {
         ensureColumn('clients', 'notes', 'notes TEXT')
         ensureColumn('clients', 'portal_password', 'portal_password TEXT')
         ensureColumn('clients', 'portal_password_needs_reset', 'portal_password_needs_reset INTEGER DEFAULT 0')
+        ensureColumn('giving_history', 'office_sought', 'office_sought TEXT')
         ensureColumn('donor_assignments', 'priority_level', 'priority_level INTEGER DEFAULT 1')
         ensureColumn('donor_assignments', 'is_active', 'is_active BOOLEAN DEFAULT 1')
         ensureColumn('donor_assignments', 'assigned_by', 'assigned_by TEXT')
@@ -989,12 +1210,14 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
 
         const insertStmt = db.prepare(`
             INSERT INTO donors (
-                client_id, name, first_name, last_name, phone, email, city,
-                employer, occupation, tags, suggested_ask, last_gift_note,
+                client_id, name, first_name, last_name, phone, email,
+                street_address, address_line2, city, state, postal_code,
+                employer, occupation, job_title, tags, suggested_ask, last_gift_note,
                 notes, bio, photo_url
             ) VALUES (
-                @client_id, @name, @first_name, @last_name, @phone, @email, @city,
-                @employer, @occupation, @tags, @suggested_ask, @last_gift_note,
+                @client_id, @name, @first_name, @last_name, @phone, @email,
+                @street_address, @address_line2, @city, @state, @postal_code,
+                @employer, @occupation, @job_title, @tags, @suggested_ask, @last_gift_note,
                 @notes, @bio, @photo_url
             )
         `)
@@ -1007,9 +1230,14 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
                 last_name = COALESCE(@last_name, last_name),
                 phone = COALESCE(@phone, phone),
                 email = COALESCE(@email, email),
+                street_address = COALESCE(@street_address, street_address),
+                address_line2 = COALESCE(@address_line2, address_line2),
                 city = COALESCE(@city, city),
+                state = COALESCE(@state, state),
+                postal_code = COALESCE(@postal_code, postal_code),
                 employer = COALESCE(@employer, employer),
                 occupation = COALESCE(@occupation, occupation),
+                job_title = COALESCE(@job_title, job_title),
                 tags = COALESCE(@tags, tags),
                 suggested_ask = COALESCE(@suggested_ask, suggested_ask),
                 last_gift_note = COALESCE(@last_gift_note, last_gift_note),
@@ -1033,12 +1261,13 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
         const findContributionStmt = db.prepare(`
             SELECT id FROM giving_history
             WHERE donor_id = ? AND year = ? AND candidate = ? AND amount = ?
+              AND COALESCE(office_sought, '') = COALESCE(?, '')
             LIMIT 1
         `)
 
         const insertContributionStmt = db.prepare(`
-            INSERT INTO giving_history (donor_id, year, candidate, amount)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO giving_history (donor_id, year, candidate, office_sought, amount)
+            VALUES (?, ?, ?, ?, ?)
         `)
 
         const applyRows = db.transaction((entries) => {
@@ -1085,7 +1314,8 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
 
                     const seenContributions = new Set()
                     contributionResult.entries.forEach((entry) => {
-                        const key = `${entry.year}|${entry.candidate.toLowerCase()}|${entry.amount}`
+                        const officeKey = entry.officeSought ? entry.officeSought.toLowerCase() : ''
+                        const key = `${entry.year}|${entry.candidate.toLowerCase()}|${entry.amount}|${officeKey}`
                         if (seenContributions.has(key)) {
                             summary.contributionsSkipped += 1
                             return
@@ -1096,14 +1326,21 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
                             finalDonorId,
                             entry.year,
                             entry.candidate,
-                            entry.amount
+                            entry.amount,
+                            entry.officeSought || null
                         )
                         if (existingContribution) {
                             summary.contributionsSkipped += 1
                             return
                         }
 
-                        insertContributionStmt.run(finalDonorId, entry.year, entry.candidate, entry.amount)
+                        insertContributionStmt.run(
+                            finalDonorId,
+                            entry.year,
+                            entry.candidate,
+                            entry.officeSought || null,
+                            entry.amount
+                        )
                         summary.contributionsAdded += 1
                     })
                 } catch (error) {
@@ -1629,11 +1866,29 @@ app.post('/api/clients/:clientId/donors', authenticateManager, (req, res) => {
 
     try {
         const donorStmt = db.prepare(`
-            INSERT INTO donors(name,phone,email,city,employer,occupation,bio,photo_url,tags,suggested_ask,last_gift_note)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO donors(
+                name, phone, email, street_address, address_line2, city, state, postal_code,
+                employer, occupation, job_title, bio, photo_url, tags, suggested_ask, last_gift_note
+            )
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `)
+        const street = cleanString(d.street_address ?? d.street)
+        const addressLine2 = cleanString(d.address_line2 ?? d.addressLine2)
+        const city = cleanString(d.city)
+        const state = cleanString(d.state ?? d.region)
+        const postal = cleanString(d.postal_code ?? d.postalCode)
         const donorResult = donorStmt.run(
-            d.name, d.phone, d.email, d.city, d.employer, d.occupation, 
+            d.name,
+            d.phone,
+            d.email,
+            street,
+            addressLine2,
+            city,
+            state,
+            postal,
+            d.employer,
+            d.occupation,
+            d.job_title || d.title || null,
             d.bio, d.photo_url, d.tags, d.suggested_ask, d.last_gift_note
         )
 
@@ -1717,11 +1972,18 @@ app.post('/api/donors', authenticateManager, (req, res) => {
     try {
         const stmt = db.prepare(`
             INSERT INTO donors (
-                client_id, name, first_name, last_name, phone, email, city,
-                employer, occupation, tags, suggested_ask, last_gift_note,
+                client_id, name, first_name, last_name, phone, email,
+                street_address, address_line2, city, state, postal_code,
+                employer, occupation, job_title, tags, suggested_ask, last_gift_note,
                 notes, bio, photo_url
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
+
+        const street = cleanString(payload.street ?? payload.streetAddress)
+        const addressLine2 = cleanString(payload.addressLine2)
+        const city = cleanString(payload.city)
+        const state = cleanString(payload.state)
+        const postal = cleanString(payload.postalCode ?? payload.postal)
 
         const result = stmt.run(
             ownerClientId,
@@ -1730,9 +1992,14 @@ app.post('/api/donors', authenticateManager, (req, res) => {
             payload.lastName || null,
             payload.phone || null,
             payload.email || null,
-            payload.city || null,
+            street,
+            addressLine2,
+            city,
+            state,
+            postal,
             payload.company || null,
             payload.industry || null,
+            payload.title || payload.jobTitle || null,
             payload.tags || null,
             payload.ask !== undefined && payload.ask !== null && payload.ask !== '' ? Number(payload.ask) : null,
             payload.lastGift || null,
@@ -1757,21 +2024,22 @@ app.post('/api/donors', authenticateManager, (req, res) => {
         const historyEntries = Array.isArray(payload.history) ? payload.history : []
         if (historyEntries.length) {
             const historyStmt = db.prepare(`
-                INSERT INTO giving_history (donor_id, year, candidate, amount)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO giving_history (donor_id, year, candidate, office_sought, amount)
+                VALUES (?, ?, ?, ?, ?)
             `)
             const historyTransaction = db.transaction((entries) => {
                 entries.forEach((entry) => {
                     if (!entry) return
                     const year = Number(entry.year)
                     const candidate = entry.candidate ? String(entry.candidate) : ''
+                    const officeSought = entry.officeSought || entry.office_sought || ''
                     const amount = entry.amount === null || entry.amount === undefined || entry.amount === ''
                         ? null
                         : Number(entry.amount)
                     if (!candidate || Number.isNaN(year) || amount === null || Number.isNaN(amount)) {
                         return
                     }
-                    historyStmt.run(donorId, year, candidate, amount)
+                    historyStmt.run(donorId, year, candidate, officeSought || null, amount)
                 })
             })
             historyTransaction(historyEntries)
@@ -1801,6 +2069,16 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
             payload.ask === null || payload.ask === undefined || payload.ask === ''
                 ? null
                 : Number(payload.ask)
+        const jobTitle = payload.title ?? payload.jobTitle ?? existing.job_title
+        const streetInput = payload.street ?? payload.streetAddress
+        const addressLine2Input = payload.addressLine2
+        const cityValue = payload.city === undefined ? existing.city : cleanString(payload.city)
+        const stateInput = payload.state
+        const postalInput = payload.postalCode ?? payload.postal
+        const streetValue = streetInput === undefined ? existing.street_address : cleanString(streetInput)
+        const addressLine2Value = addressLine2Input === undefined ? existing.address_line2 : cleanString(addressLine2Input)
+        const stateValue = stateInput === undefined ? existing.state : cleanString(stateInput)
+        const postalValue = postalInput === undefined ? existing.postal_code : cleanString(postalInput)
 
         const stmt = db.prepare(`
             UPDATE donors
@@ -1809,9 +2087,14 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
                 last_name = ?,
                 phone = ?,
                 email = ?,
+                street_address = ?,
+                address_line2 = ?,
                 city = ?,
+                state = ?,
+                postal_code = ?,
                 employer = ?,
                 occupation = ?,
+                job_title = ?,
                 tags = ?,
                 suggested_ask = ?,
                 last_gift_note = ?,
@@ -1827,9 +2110,14 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
             lastName || null,
             payload.phone ?? existing.phone,
             payload.email ?? existing.email,
-            payload.city ?? existing.city,
+            streetValue,
+            addressLine2Value,
+            cityValue,
+            stateValue,
+            postalValue,
             payload.company ?? existing.employer,
             payload.industry ?? existing.occupation,
+            jobTitle,
             payload.tags ?? existing.tags,
             suggestedAsk,
             payload.lastGift ?? existing.last_gift_note,
@@ -1855,7 +2143,7 @@ function getDonorDetail(donorId) {
     let history = []
     try {
         history = db.prepare(`
-            SELECT id, year, candidate, amount
+            SELECT id, year, candidate, office_sought, amount, created_at
             FROM giving_history
             WHERE donor_id = ?
             ORDER BY year DESC, created_at DESC
@@ -1957,6 +2245,7 @@ function buildGivingSummary(rows = []) {
         const yearValue = Number(row.year)
         const year = Number.isFinite(yearValue) ? yearValue : null
         const candidate = row.candidate || null
+        const officeSought = row.office_sought || row.officeSought || null
 
         contributionCount += 1
         totalAmount += amount
@@ -1979,6 +2268,7 @@ function buildGivingSummary(rows = []) {
                 year,
                 amount,
                 candidate,
+                officeSought,
                 createdAt: row.created_at || null
             })
         }
@@ -2060,7 +2350,7 @@ app.get('/api/giving/candidates/:candidate/summary', authenticateManager, (req, 
 
     try {
         const contributions = db.prepare(`
-            SELECT gh.id, gh.donor_id, gh.year, gh.candidate, gh.amount, gh.created_at,
+            SELECT gh.id, gh.donor_id, gh.year, gh.candidate, gh.office_sought, gh.amount, gh.created_at,
                    d.name AS donor_name
             FROM giving_history gh
             JOIN donors d ON d.id = gh.donor_id
@@ -2127,7 +2417,7 @@ app.get('/api/giving/search', authenticateManager, (req, res) => {
 
     try {
         const contributions = db.prepare(`
-            SELECT gh.id, gh.donor_id, gh.year, gh.candidate, gh.amount, gh.created_at,
+            SELECT gh.id, gh.donor_id, gh.year, gh.candidate, gh.office_sought, gh.amount, gh.created_at,
                    d.name AS donor_name
             FROM giving_history gh
             JOIN donors d ON d.id = gh.donor_id
@@ -2162,15 +2452,50 @@ app.get('/api/donors/:donorId/giving', authenticateManager, (req, res) => {
 // Add giving history
 app.post('/api/donors/:donorId/giving', authenticateManager, (req, res) => {
     const { year, candidate, amount } = req.body || {}
-    if (!year || !candidate || amount == null) return res.status(400).json({ error: 'year, candidate, amount required' })
+    const officeSought = cleanString(req.body?.officeSought ?? req.body?.office_sought)
+    const yearValue = Number.parseInt(year, 10)
+    const candidateName = cleanString(candidate)
+    const amountValue = Number(amount)
+    if (!Number.isInteger(yearValue) || !candidateName || !Number.isFinite(amountValue)) {
+        return res.status(400).json({ error: 'year, candidate, amount required' })
+    }
 
     try {
         const stmt = db.prepare(`
-            INSERT INTO giving_history(donor_id, year, candidate, amount)
-            VALUES (?,?,?,?)
+            INSERT INTO giving_history(donor_id, year, candidate, office_sought, amount)
+            VALUES (?,?,?,?,?)
         `)
-        const result = stmt.run(req.params.donorId, year, candidate, amount)
+        const result = stmt.run(req.params.donorId, yearValue, candidateName, officeSought, amountValue)
         res.json({ id: result.lastInsertRowid })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+})
+
+app.patch('/api/donors/:donorId/giving/:entryId', authenticateManager, (req, res) => {
+    const { donorId, entryId } = req.params
+    const { year, candidate, amount } = req.body || {}
+    const officeSought = cleanString(req.body?.officeSought ?? req.body?.office_sought)
+    const yearValue = Number.parseInt(year, 10)
+    const candidateName = cleanString(candidate)
+    const amountValue = Number(amount)
+    if (!Number.isInteger(yearValue) || !candidateName || !Number.isFinite(amountValue)) {
+        return res.status(400).json({ error: 'year, candidate, amount required' })
+    }
+
+    try {
+        const existing = db.prepare('SELECT id FROM giving_history WHERE id = ? AND donor_id = ?').get(entryId, donorId)
+        if (!existing) {
+            return res.status(404).json({ error: 'Contribution not found' })
+        }
+
+        const stmt = db.prepare(`
+            UPDATE giving_history
+            SET year = ?, candidate = ?, office_sought = ?, amount = ?
+            WHERE id = ? AND donor_id = ?
+        `)
+        stmt.run(yearValue, candidateName, officeSought, amountValue, entryId, donorId)
+        res.json({ success: true })
     } catch (error) {
         res.status(500).json({ error: error.message })
     }

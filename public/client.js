@@ -581,11 +581,25 @@ function renderQueue() {
     const isCompleted = !["Not Contacted", "No Answer - Left Message", "No Answer - No Message"].includes(status);
     card.className = `queue-item ${isCompleted ? "completed" : ""}`;
     card.setAttribute("data-donor-id", donor.id);
+    const employer = donor.company || donor.employer || "";
+    const jobTitle = donor.job_title || donor.title || "";
+    const location = formatDonorLocation(donor);
+    let professional = "";
+    if (jobTitle && employer) {
+      professional = `${jobTitle} @ ${employer}`;
+    } else if (jobTitle) {
+      professional = jobTitle;
+    } else if (employer) {
+      professional = employer;
+    } else {
+      professional = "Unknown employer";
+    }
+
     card.innerHTML = `
       <div class="queue-donor-info">
         <div class="queue-donor-name">${donor.name || `${donor.first_name || ""} ${donor.last_name || ""}`.trim() || "Unnamed donor"}</div>
         <div class="queue-donor-details">
-          ${(donor.company || donor.employer || "Unknown employer")} • ${donor.phone || "No phone"} • Capacity: $${formatCurrency(
+          ${professional}${location ? ` • ${location}` : ""} • ${donor.phone || "No phone"} • Capacity: $${formatCurrency(
             donor.capacity || donor.suggested_ask || 0,
           )}
         </div>
@@ -643,7 +657,14 @@ function renderDonorDetails(details) {
       ${renderInfoItem("Phone", details.phone || "No phone on file")}
       ${renderInfoItem("Email", details.email || "No email on file")}
       ${renderInfoItem("Employer", details.company || details.employer || "Unknown")}
-      ${renderInfoItem("City", details.city || "Unknown")}
+      ${renderInfoItem("Title", details.job_title || details.title || "Unknown")}
+      ${renderInfoItem("Street address", formatStreetAddress(details) || "Unknown")}
+      ${renderInfoItem("City", normalizeText(details.city) || "Unknown")}
+      ${renderInfoItem("State / Region", normalizeText(details.state) || "Unknown")}
+      ${renderInfoItem(
+        "Postal code",
+        normalizeText(details.postal_code || details.postalCode) || "Unknown",
+      )}
       ${renderInfoItem("Industry", details.industry || details.occupation || "Unknown")}
       ${renderInfoItem("Giving capacity", `$${formatCurrency(details.capacity || details.suggested_ask || 0)}`)}
       ${renderInfoItem("Last gift", details.last_gift || details.last_gift_note || "N/A")}
@@ -721,6 +742,32 @@ function renderCallHistory(history = []) {
     list.append(item);
   });
   elements.callHistory.append(list);
+}
+
+function normalizeText(value) {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+}
+
+function formatDonorLocation(donor) {
+  if (!donor) return "";
+  const city = normalizeText(donor.city);
+  const state = normalizeText(donor.state);
+  const postal = normalizeText(donor.postal_code || donor.postalCode);
+  const locality = [city, state].filter(Boolean).join(", ");
+  if (postal) {
+    return locality ? `${locality} ${postal}` : postal;
+  }
+  return locality;
+}
+
+function formatStreetAddress(donor) {
+  if (!donor) return "";
+  const street = normalizeText(donor.street_address || donor.streetAddress);
+  const line2 = normalizeText(donor.address_line2 || donor.addressLine2);
+  const lines = [street, line2].filter(Boolean);
+  if (!lines.length) return "";
+  return lines.join("<br />");
 }
 
 function renderInfoItem(label, value) {

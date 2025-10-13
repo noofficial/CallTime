@@ -18,6 +18,7 @@ const state = {
   detailDraft: null,
   detailStatus: null,
   detailStatusTimeout: null,
+  historyEdit: null,
   donorDetails: new Map(),
   loadingDetailFor: null,
   givingInsights: {
@@ -223,7 +224,12 @@ function normalizeDonorSummary(donor) {
     email: donor.email || "",
     phone: donor.phone || "",
     city: donor.city || "",
+    state: donor.state || "",
+    postalCode: donor.postal_code || "",
+    street: donor.street_address || "",
+    addressLine2: donor.address_line2 || "",
     company: donor.employer || "",
+    title: donor.job_title || donor.title || "",
     industry: donor.occupation || "",
     tags: donor.tags || "",
     ask: Number.isNaN(askValue) ? null : askValue,
@@ -275,7 +281,12 @@ function applyFilters() {
         donor.email,
         donor.phone,
         donor.city,
+        donor.state,
+        donor.postalCode,
+        donor.street,
+        donor.addressLine2,
         donor.company,
+        donor.title,
         donor.industry,
         donor.tags,
       ]
@@ -368,10 +379,14 @@ function normalizeDonorDetail(detail) {
   const summary = normalizeDonorSummary(detail);
   const history = Array.isArray(detail.history)
     ? detail.history.map((entry) => ({
-        id: String(entry.id),
-        year: entry.year,
-        candidate: entry.candidate,
+        id: entry.id != null ? String(entry.id) : "",
+        year: Number.isInteger(Number.parseInt(entry.year, 10))
+          ? Number.parseInt(entry.year, 10)
+          : null,
+        candidate: entry.candidate || "",
+        officeSought: entry.officeSought || entry.office_sought || "",
         amount: entry.amount,
+        createdAt: entry.createdAt || entry.created_at || null,
       }))
     : [];
   history.sort((a, b) => {
@@ -468,7 +483,9 @@ function renderDonorList() {
     button.className = "database-list__button";
     button.setAttribute("data-donor-id", donor.id);
     const metaParts = [];
-    if (donor.city) metaParts.push(donor.city);
+    const location = buildLocationLabel(donor.city, donor.state, donor.postalCode);
+    if (location) metaParts.push(location);
+    if (donor.title) metaParts.push(donor.title);
     if (donor.company) metaParts.push(donor.company);
     const assigned = state.assignments.get(donor.id) || new Set();
     const assignedCount = assigned.size;
@@ -526,6 +543,9 @@ function renderDonorDetail() {
 
   if (!state.detailDraft || state.detailDraft.id !== summary.id) {
     state.detailDraft = createDraftFromDonor(detail);
+  }
+  if (!state.historyEdit || state.historyEdit.donorId !== summary.id) {
+    state.historyEdit = null;
   }
 
   const draft = state.detailDraft;
@@ -647,10 +667,12 @@ function handleDonorModalKeydown(event) {
 function createDraftFromDonor(donor) {
   const history = Array.isArray(donor.history)
     ? donor.history.map((entry) => ({
-        id: entry.id,
+        id: entry.id != null ? String(entry.id) : "",
         year: entry.year,
         candidate: entry.candidate,
+        officeSought: entry.officeSought || "",
         amount: entry.amount,
+        createdAt: entry.createdAt || null,
       }))
     : [];
   sortHistory(history);
@@ -661,8 +683,13 @@ function createDraftFromDonor(donor) {
       lastName: donor.lastName || "",
       email: donor.email || "",
       phone: donor.phone || "",
+      street: donor.street || "",
+      addressLine2: donor.addressLine2 || "",
       city: donor.city || "",
+      state: donor.state || "",
+      postalCode: donor.postalCode || "",
       company: donor.company || "",
+      title: donor.title || "",
       industry: donor.industry || "",
       tags: donor.tags || "",
       ask:
@@ -686,8 +713,19 @@ function buildDraftDisplayName(values, donor) {
   return "New donor";
 }
 
+function buildLocationLabel(city, state, postalCode) {
+  const locality = [city, state].filter(Boolean).join(", ");
+  if (postalCode) {
+    return locality ? `${locality} ${postalCode}` : postalCode;
+  }
+  return locality;
+}
+
 function buildDraftMeta(values) {
-  return [values.city, values.company, values.industry].filter(Boolean).join(" • ");
+  const location = buildLocationLabel(values.city, values.state, values.postalCode);
+  return [location, values.title, values.company, values.industry]
+    .filter(Boolean)
+    .join(" • ");
 }
 
 function createIdentitySection(draft) {
@@ -715,7 +753,27 @@ function createIdentitySection(draft) {
     createInputField("inline-phone", "phone", "Phone", draft.values.phone, {
       autocomplete: "tel",
     }),
-    createInputField("inline-city", "city", "City", draft.values.city),
+    createInputField("inline-street", "street", "Street address", draft.values.street, {
+      autocomplete: "address-line1",
+    }),
+    createInputField(
+      "inline-address-line-2",
+      "addressLine2",
+      "Address line 2",
+      draft.values.addressLine2,
+      {
+        autocomplete: "address-line2",
+      },
+    ),
+    createInputField("inline-city", "city", "City", draft.values.city, {
+      autocomplete: "address-level2",
+    }),
+    createInputField("inline-state", "state", "State / Region", draft.values.state, {
+      autocomplete: "address-level1",
+    }),
+    createInputField("inline-postal-code", "postalCode", "Postal code", draft.values.postalCode, {
+      autocomplete: "postal-code",
+    }),
   );
   section.append(grid);
   return section;
@@ -732,6 +790,7 @@ function createGivingSection(draft) {
   grid.className = "form-grid";
   grid.append(
     createInputField("inline-company", "company", "Company", draft.values.company),
+    createInputField("inline-title", "title", "Title / Occupation", draft.values.title),
     createInputField("inline-industry", "industry", "Industry", draft.values.industry),
     createInputField("inline-tags", "tags", "Tags", draft.values.tags, {
       placeholder: "High priority, Warm",
@@ -897,7 +956,14 @@ function handleInlineInput(event, donor, nameHeading, metaElement) {
   if (target.name === "firstName" || target.name === "lastName") {
     nameHeading.textContent = buildDraftDisplayName(state.detailDraft.values, donor);
   }
-  if (target.name === "city" || target.name === "company" || target.name === "industry") {
+  if (
+    target.name === "city" ||
+    target.name === "state" ||
+    target.name === "postalCode" ||
+    target.name === "title" ||
+    target.name === "company" ||
+    target.name === "industry"
+  ) {
     const metaText = buildDraftMeta(state.detailDraft.values);
     metaElement.textContent = metaText;
     metaElement.hidden = !metaText;
@@ -914,8 +980,13 @@ async function handleInlineSubmit(donor) {
     lastName: values.lastName.trim(),
     email: values.email.trim(),
     phone: values.phone.trim(),
+    street: values.street.trim(),
+    addressLine2: values.addressLine2.trim(),
     city: values.city.trim(),
+    state: values.state.trim(),
+    postalCode: values.postalCode.trim(),
     company: values.company.trim(),
+    title: values.title.trim(),
     industry: values.industry.trim(),
     tags: values.tags.trim(),
     ask: parseNumber(values.ask),
@@ -1060,6 +1131,11 @@ function createHistorySection(donor) {
   candidateInput.id = "inline-history-candidate";
   candidateInput.name = "historyCandidate";
   candidateInput.placeholder = "Candidate";
+  const officeInput = document.createElement("input");
+  officeInput.className = "input";
+  officeInput.id = "inline-history-office";
+  officeInput.name = "historyOffice";
+  officeInput.placeholder = "Office sought";
   const amountInput = document.createElement("input");
   amountInput.className = "input";
   amountInput.type = "number";
@@ -1073,10 +1149,10 @@ function createHistorySection(donor) {
   addButton.className = "btn";
   addButton.textContent = "Add";
   addButton.addEventListener("click", () => {
-    void addHistoryEntry(donor.id, yearInput, candidateInput, amountInput);
+    void addHistoryEntry(donor.id, yearInput, candidateInput, officeInput, amountInput);
   });
 
-  formRow.append(yearInput, candidateInput, amountInput, addButton);
+  formRow.append(yearInput, candidateInput, officeInput, amountInput, addButton);
   section.append(formRow);
 
   const list = document.createElement("div");
@@ -1091,9 +1167,37 @@ function createHistorySection(donor) {
       }
       return;
     }
-    const button = event.target.closest("[data-remove-history]");
-    if (!button) return;
-    const entryId = button.getAttribute("data-remove-history");
+    const saveButton = event.target.closest("[data-save-history]");
+    if (saveButton) {
+      const entryId = saveButton.getAttribute("data-save-history");
+      const row = saveButton.closest("tr");
+      if (!entryId || !row) return;
+      const yearInput = row.querySelector("[data-history-year]");
+      const candidateInput = row.querySelector("[data-history-candidate]");
+      const officeInput = row.querySelector("[data-history-office]");
+      const amountInput = row.querySelector("[data-history-amount]");
+      void updateHistoryEntry(donor.id, entryId, yearInput, candidateInput, officeInput, amountInput);
+      return;
+    }
+    const cancelButton = event.target.closest("[data-cancel-history-edit]");
+    if (cancelButton) {
+      state.historyEdit = null;
+      renderHistoryItems(list, state.detailDraft?.history || []);
+      return;
+    }
+    const editButton = event.target.closest("[data-edit-history]");
+    if (editButton) {
+      const entryId = editButton.getAttribute("data-edit-history");
+      if (!entryId) return;
+      const existing = (state.detailDraft?.history || []).find((item) => item.id === entryId);
+      if (!existing) return;
+      state.historyEdit = { donorId: donor.id, entryId };
+      renderHistoryItems(list, state.detailDraft?.history || []);
+      return;
+    }
+    const removeButton = event.target.closest("[data-remove-history]");
+    if (!removeButton) return;
+    const entryId = removeButton.getAttribute("data-remove-history");
     void removeHistoryEntry(donor.id, entryId);
   });
   section.append(list);
@@ -1113,55 +1217,127 @@ function renderHistoryItems(container, history = []) {
   const table = document.createElement("table");
   table.className = "donor-history";
   const head = document.createElement("thead");
-  head.innerHTML = "<tr><th>Year</th><th>Candidate</th><th>Amount</th><th></th></tr>";
+  head.innerHTML = "<tr><th>Year</th><th>Candidate</th><th>Office sought</th><th>Amount</th><th></th></tr>";
   table.append(head);
   const body = document.createElement("tbody");
+  const editingId =
+    state.historyEdit && state.historyEdit.donorId === state.selectedDonorId
+      ? state.historyEdit.entryId
+      : null;
   history.forEach((entry) => {
     const row = document.createElement("tr");
+    const isEditing = editingId === entry.id;
+
     const yearCell = document.createElement("td");
-    yearCell.textContent = entry.year || "—";
     const candidateCell = document.createElement("td");
-    if (entry.candidate) {
-      const candidateButton = document.createElement("button");
-      candidateButton.type = "button";
-      candidateButton.className = "link-button";
-      candidateButton.textContent = entry.candidate;
-      candidateButton.setAttribute("data-view-candidate", entry.candidate);
-      candidateCell.append(candidateButton);
-    } else {
-      candidateCell.textContent = "—";
-    }
+    const officeCell = document.createElement("td");
     const amountCell = document.createElement("td");
-    amountCell.textContent =
-      entry.amount === null || entry.amount === undefined
-        ? "—"
-        : `$${formatCurrency(entry.amount)}`;
     const actionsCell = document.createElement("td");
     actionsCell.className = "donor-history__actions";
-    const removeButton = document.createElement("button");
-    removeButton.type = "button";
-    removeButton.className = "btn btn--ghost";
-    removeButton.textContent = "Remove";
-    removeButton.setAttribute("data-remove-history", entry.id);
-    actionsCell.append(removeButton);
-    row.append(yearCell, candidateCell, amountCell, actionsCell);
+
+    if (isEditing) {
+      const yearInput = document.createElement("input");
+      yearInput.type = "number";
+      yearInput.className = "input";
+      yearInput.placeholder = "2024";
+      yearInput.value = entry.year != null ? String(entry.year) : "";
+      yearInput.setAttribute("data-history-year", entry.id);
+      yearCell.append(yearInput);
+
+      const candidateInput = document.createElement("input");
+      candidateInput.type = "text";
+      candidateInput.className = "input";
+      candidateInput.placeholder = "Candidate";
+      candidateInput.value = entry.candidate || "";
+      candidateInput.setAttribute("data-history-candidate", entry.id);
+      candidateCell.append(candidateInput);
+
+      const officeInput = document.createElement("input");
+      officeInput.type = "text";
+      officeInput.className = "input";
+      officeInput.placeholder = "Office sought";
+      officeInput.value = entry.officeSought || entry.office_sought || "";
+      officeInput.setAttribute("data-history-office", entry.id);
+      officeCell.append(officeInput);
+
+      const amountInput = document.createElement("input");
+      amountInput.type = "number";
+      amountInput.className = "input";
+      amountInput.placeholder = "500";
+      amountInput.min = "0";
+      amountInput.step = "1";
+      amountInput.value =
+        entry.amount === null || entry.amount === undefined ? "" : String(entry.amount);
+      amountInput.setAttribute("data-history-amount", entry.id);
+      amountCell.append(amountInput);
+
+      const saveButton = document.createElement("button");
+      saveButton.type = "button";
+      saveButton.className = "btn btn--primary";
+      saveButton.textContent = "Save";
+      saveButton.setAttribute("data-save-history", entry.id);
+
+      const cancelButton = document.createElement("button");
+      cancelButton.type = "button";
+      cancelButton.className = "btn btn--ghost";
+      cancelButton.textContent = "Cancel";
+      cancelButton.setAttribute("data-cancel-history-edit", entry.id);
+
+      actionsCell.append(saveButton, cancelButton);
+    } else {
+      yearCell.textContent = entry.year || "—";
+      if (entry.candidate) {
+        const candidateButton = document.createElement("button");
+        candidateButton.type = "button";
+        candidateButton.className = "link-button";
+        candidateButton.textContent = entry.candidate;
+        candidateButton.setAttribute("data-view-candidate", entry.candidate);
+        candidateCell.append(candidateButton);
+      } else {
+        candidateCell.textContent = "—";
+      }
+      const officeValue = entry.officeSought || entry.office_sought || "";
+      officeCell.textContent = officeValue || "—";
+      amountCell.textContent =
+        entry.amount === null || entry.amount === undefined
+          ? "—"
+          : `$${formatCurrency(entry.amount)}`;
+
+      const editButton = document.createElement("button");
+      editButton.type = "button";
+      editButton.className = "btn btn--ghost";
+      editButton.textContent = "Edit";
+      editButton.setAttribute("data-edit-history", entry.id);
+
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "btn btn--ghost";
+      removeButton.textContent = "Remove";
+      removeButton.setAttribute("data-remove-history", entry.id);
+
+      actionsCell.append(editButton, removeButton);
+    }
+
+    row.append(yearCell, candidateCell, officeCell, amountCell, actionsCell);
     body.append(row);
   });
   table.append(body);
   container.append(table);
 }
 
-async function addHistoryEntry(donorId, yearInput, candidateInput, amountInput) {
+async function addHistoryEntry(donorId, yearInput, candidateInput, officeInput, amountInput) {
   const yearValue = parseInt(yearInput.value, 10);
   const candidate = candidateInput.value.trim();
+  const office = officeInput ? officeInput.value.trim() : "";
   const amountValue = parseNumber(amountInput.value);
-  if (!candidate && Number.isNaN(yearValue) && amountValue === null) {
+  if (Number.isNaN(yearValue) || !candidate || amountValue === null) {
     return;
   }
   try {
     const payload = {
-      year: Number.isNaN(yearValue) ? undefined : yearValue,
+      year: yearValue,
       candidate,
+      officeSought: office || undefined,
       amount: amountValue,
     };
     await fetchJson(`/api/donors/${donorId}/giving`, {
@@ -1171,6 +1347,7 @@ async function addHistoryEntry(donorId, yearInput, candidateInput, amountInput) 
     });
     yearInput.value = "";
     candidateInput.value = "";
+    if (officeInput) officeInput.value = "";
     amountInput.value = "";
     await refreshData({ donorId, preserveDraft: true, skipClients: true });
   } catch (error) {
@@ -1178,9 +1355,40 @@ async function addHistoryEntry(donorId, yearInput, candidateInput, amountInput) 
   }
 }
 
+async function updateHistoryEntry(donorId, entryId, yearInput, candidateInput, officeInput, amountInput) {
+  if (!entryId) return;
+  const yearValue = yearInput ? parseInt(yearInput.value, 10) : NaN;
+  const candidate = candidateInput ? candidateInput.value.trim() : "";
+  const office = officeInput ? officeInput.value.trim() : "";
+  const amountValue = amountInput ? parseNumber(amountInput.value) : null;
+  if (Number.isNaN(yearValue) || !candidate || amountValue === null) {
+    return;
+  }
+  try {
+    const payload = {
+      year: yearValue,
+      candidate,
+      officeSought: office || undefined,
+      amount: amountValue,
+    };
+    await fetchJson(`/api/donors/${donorId}/giving/${entryId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    state.historyEdit = null;
+    await refreshData({ donorId, preserveDraft: true, skipClients: true });
+  } catch (error) {
+    console.error("Failed to update contribution", error);
+  }
+}
+
 async function removeHistoryEntry(donorId, entryId) {
   if (!entryId) return;
   try {
+    if (state.historyEdit && state.historyEdit.entryId === entryId) {
+      state.historyEdit = null;
+    }
     await fetchJson(`/api/donors/${donorId}/giving/${entryId}`, { method: "DELETE" });
     await refreshData({ donorId, preserveDraft: true, skipClients: true });
   } catch (error) {
@@ -1302,7 +1510,11 @@ function sortHistory(history) {
     if (yearA !== yearB) {
       return yearB - yearA;
     }
-    return (a.candidate || "").localeCompare(b.candidate || "");
+    const candidateCompare = (a.candidate || "").localeCompare(b.candidate || "");
+    if (candidateCompare !== 0) {
+      return candidateCompare;
+    }
+    return (a.officeSought || "").localeCompare(b.officeSought || "");
   });
 }
 
@@ -1780,6 +1992,12 @@ function createDonorInsightsList(donors = [], { includeCandidate = false } = {})
         candidateButton.textContent = contribution.candidate;
         candidateButton.setAttribute("data-insights-candidate", contribution.candidate);
         details.append(candidateButton);
+      }
+      if (contribution.officeSought) {
+        const office = document.createElement("span");
+        office.className = "insights-donor__contribution-office muted";
+        office.textContent = contribution.officeSought;
+        details.append(office);
       }
 
       const amount = document.createElement("span");

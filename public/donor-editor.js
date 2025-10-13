@@ -12,6 +12,7 @@ const elements = {
   historyList: document.getElementById("history-list"),
   historyYear: document.getElementById("history-year"),
   historyCandidate: document.getElementById("history-candidate"),
+  historyOffice: document.getElementById("history-office"),
   historyAmount: document.getElementById("history-amount"),
   addHistory: document.getElementById("add-history"),
 };
@@ -68,6 +69,7 @@ function resetEditorState() {
   elements.form?.reset();
   if (elements.historyYear) elements.historyYear.value = "";
   if (elements.historyCandidate) elements.historyCandidate.value = "";
+  if (elements.historyOffice) elements.historyOffice.value = "";
   if (elements.historyAmount) elements.historyAmount.value = "";
 }
 
@@ -106,9 +108,14 @@ async function handleSubmit(event) {
     lastName: formData.get("lastName")?.toString().trim() || "",
     email: formData.get("email")?.toString().trim() || "",
     phone: formData.get("phone")?.toString().trim() || "",
+    street: formData.get("street")?.toString().trim() || "",
+    addressLine2: formData.get("addressLine2")?.toString().trim() || "",
     company: formData.get("company")?.toString().trim() || "",
+    title: formData.get("title")?.toString().trim() || "",
     industry: formData.get("industry")?.toString().trim() || "",
     city: formData.get("city")?.toString().trim() || "",
+    state: formData.get("state")?.toString().trim() || "",
+    postalCode: formData.get("postalCode")?.toString().trim() || "",
     tags: formData.get("tags")?.toString().trim() || "",
     ask: parseNumber(formData.get("ask")),
     lastGift: formData.get("lastGift")?.toString().trim() || "",
@@ -145,6 +152,7 @@ async function handleSubmit(event) {
 function handleAddHistory() {
   const yearValue = parseInt(elements.historyYear.value, 10);
   const candidate = elements.historyCandidate.value.trim();
+  const office = elements.historyOffice ? elements.historyOffice.value.trim() : "";
   const amountValue = parseNumber(elements.historyAmount.value);
   if (!candidate && Number.isNaN(yearValue) && amountValue === null) {
     return;
@@ -153,6 +161,7 @@ function handleAddHistory() {
     id: createId(`${Date.now()}-${elements.historyYear.value}-${candidate}-${elements.historyAmount.value}`),
     year: Number.isNaN(yearValue) ? undefined : yearValue,
     candidate,
+    officeSought: office,
     amount: amountValue,
   };
   state.history.push(entry);
@@ -160,6 +169,7 @@ function handleAddHistory() {
   renderHistory();
   elements.historyYear.value = "";
   elements.historyCandidate.value = "";
+  if (elements.historyOffice) elements.historyOffice.value = "";
   elements.historyAmount.value = "";
   elements.historyYear.focus();
 }
@@ -238,7 +248,7 @@ function renderHistory() {
   const table = document.createElement("table");
   table.className = "editor-history";
   const head = document.createElement("thead");
-  head.innerHTML = "<tr><th>Year</th><th>Candidate</th><th>Amount</th><th></th></tr>";
+  head.innerHTML = "<tr><th>Year</th><th>Candidate</th><th>Office sought</th><th>Amount</th><th></th></tr>";
   table.append(head);
   const body = document.createElement("tbody");
   state.history.forEach((entry) => {
@@ -247,6 +257,8 @@ function renderHistory() {
     yearCell.textContent = entry.year || "—";
     const candidateCell = document.createElement("td");
     candidateCell.textContent = entry.candidate || "—";
+    const officeCell = document.createElement("td");
+    officeCell.textContent = entry.officeSought || "—";
     const amountCell = document.createElement("td");
     amountCell.textContent =
       entry.amount === null || entry.amount === undefined
@@ -260,7 +272,7 @@ function renderHistory() {
     removeButton.setAttribute("data-remove-history", entry.id);
     removeButton.textContent = "Remove";
     actionsCell.append(removeButton);
-    row.append(yearCell, candidateCell, amountCell, actionsCell);
+    row.append(yearCell, candidateCell, officeCell, amountCell, actionsCell);
     body.append(row);
   });
   table.append(body);
@@ -275,7 +287,11 @@ function sortHistory() {
     if (yearA !== yearB) {
       return yearB - yearA;
     }
-    return (a.candidate || "").localeCompare(b.candidate || "");
+    const candidateCompare = (a.candidate || "").localeCompare(b.candidate || "");
+    if (candidateCompare !== 0) {
+      return candidateCompare;
+    }
+    return (a.officeSought || "").localeCompare(b.officeSought || "");
   });
 }
 
