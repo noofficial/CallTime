@@ -806,12 +806,115 @@ const DONORS_COLUMN_ORDER = [
     'created_at',
 ]
 
+const schemaEntryExists = (name, type = 'table') => {
+    try {
+        const stmt = db.prepare(
+            'SELECT name FROM sqlite_master WHERE type = ? AND name = ? LIMIT 1'
+        )
+        return Boolean(stmt.get(type, name))
+    } catch (error) {
+        console.warn(`Failed to inspect schema for ${type} ${name}:`, error.message)
+        return false
+    }
+}
+
+const createDonorsTableStructure = () => {
+    db.exec(`CREATE TABLE IF NOT EXISTS donors (${DONORS_TABLE_COLUMNS_SQL})`)
+    db.exec('CREATE INDEX IF NOT EXISTS idx_donors_client ON donors(client_id)')
+}
+
+const rebuildDonorsTableFromSource = (sourceTable) => {
+    const info = db.prepare(`PRAGMA table_info(${sourceTable})`).all()
+    const availableColumns = info.map((column) => column.name)
+    const transferableColumns = DONORS_COLUMN_ORDER.filter((column) =>
+        availableColumns.includes(column)
+    )
+
+    db.exec('DROP TABLE IF EXISTS donors_new')
+    db.exec(`CREATE TABLE donors_new (${DONORS_TABLE_COLUMNS_SQL})`)
+
+    if (transferableColumns.length) {
+        const columnList = transferableColumns.join(', ')
+        db.exec(
+            `INSERT INTO donors_new (${columnList}) SELECT ${columnList} FROM ${sourceTable}`
+        )
+    }
+
+    if (sourceTable !== 'donors') {
+        db.exec('DROP TABLE IF EXISTS donors')
+    }
+
+    db.exec(`DROP TABLE ${sourceTable}`)
+    db.exec('ALTER TABLE donors_new RENAME TO donors')
+    db.exec('CREATE INDEX IF NOT EXISTS idx_donors_client ON donors(client_id)')
+    db.exec(
+        `UPDATE sqlite_sequence SET seq = COALESCE((SELECT MAX(id) FROM donors), 0) WHERE name = 'donors'`
+    )
+}
+
+const disableForeignKeysForMigration = () => {
+    let wasEnabled = 0
+    try {
+        wasEnabled = db.pragma('foreign_keys', { simple: true })
+    } catch (error) {
+        console.warn('Unable to read foreign key pragma before donor migration:', error.message)
+        return 0
+    }
+
+    if (wasEnabled) {
+        try {
+            db.pragma('foreign_keys = OFF')
+        } catch (error) {
+            console.warn('Unable to disable foreign keys before donor migration:', error.message)
+            return 0
+        }
+    }
+
+    return wasEnabled
+}
+
+const ensureDonorsLegacyView = () => {
+    try {
+        if (schemaEntryExists('donors_legacy', 'table')) {
+            return
+        }
+
+        db.exec('DROP VIEW IF EXISTS donors_legacy')
+        db.exec('CREATE VIEW donors_legacy AS SELECT * FROM donors')
+    } catch (error) {
+        console.warn('Unable to ensure donors_legacy compatibility view:', error.message)
+    }
+}
+
 const migrateDonorsTable = () => {
     let foreignKeysInitiallyEnabled = 0
 
     try {
+        const donorsExists = schemaEntryExists('donors', 'table')
+        const legacyExists = schemaEntryExists('donors_legacy', 'table')
+
+        if (!donorsExists && !legacyExists) {
+            createDonorsTableStructure()
+            console.log('Created donors table because it was missing.')
+            return
+        }
+
+        if (!donorsExists && legacyExists) {
+            foreignKeysInitiallyEnabled = disableForeignKeysForMigration()
+
+            const migrateFromLegacy = db.transaction(() => {
+                rebuildDonorsTableFromSource('donors_legacy')
+            })
+
+            migrateFromLegacy()
+            console.log('Rebuilt donors table from donors_legacy backup.')
+            return
+        }
+
         const info = db.prepare(`PRAGMA table_info(donors)`).all()
         if (!info.length) {
+            createDonorsTableStructure()
+            console.log('Recreated donors table because schema inspection failed.')
             return
         }
 
@@ -822,42 +925,10 @@ const migrateDonorsTable = () => {
             return
         }
 
-        try {
-            foreignKeysInitiallyEnabled = db.pragma('foreign_keys', { simple: true })
-        } catch (error) {
-            console.warn('Unable to read foreign key pragma before donor migration:', error.message)
-        }
-
-        if (foreignKeysInitiallyEnabled) {
-            try {
-                db.pragma('foreign_keys = OFF')
-            } catch (error) {
-                console.warn('Unable to disable foreign keys before donor migration:', error.message)
-            }
-        }
+        foreignKeysInitiallyEnabled = disableForeignKeysForMigration()
 
         const migrate = db.transaction(() => {
-            db.exec('DROP TABLE IF EXISTS donors_new')
-            db.exec(`CREATE TABLE donors_new (${DONORS_TABLE_COLUMNS_SQL})`)
-
-            const availableColumns = info.map((column) => column.name)
-            const transferableColumns = DONORS_COLUMN_ORDER.filter((column) =>
-                availableColumns.includes(column)
-            )
-
-            if (transferableColumns.length) {
-                const columnList = transferableColumns.join(', ')
-                db.exec(
-                    `INSERT INTO donors_new (${columnList}) SELECT ${columnList} FROM donors`
-                )
-            }
-
-            db.exec('DROP TABLE donors')
-            db.exec('ALTER TABLE donors_new RENAME TO donors')
-            db.exec('CREATE INDEX IF NOT EXISTS idx_donors_client ON donors(client_id)')
-            db.exec(
-                `UPDATE sqlite_sequence SET seq = (SELECT MAX(id) FROM donors) WHERE name = 'donors'`
-            )
+            rebuildDonorsTableFromSource('donors')
         })
 
         migrate()
@@ -873,6 +944,8 @@ const migrateDonorsTable = () => {
                 console.warn('Unable to re-enable foreign keys after donor migration:', error.message)
             }
         }
+
+        ensureDonorsLegacyView()
     }
 }
 
