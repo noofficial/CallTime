@@ -6,3 +6,4 @@ npm-debug.log
 **/campaign.db-shm
 **/campaign.db-wal
 **/campaign.db
+.env

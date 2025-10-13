@@ -7,6 +7,35 @@ const multer = require('multer')
 const xlsx = require('xlsx')
 const Database = require('better-sqlite3')
 
+const envFilePath = path.join(__dirname, '..', '.env')
+if (fs.existsSync(envFilePath)) {
+    try {
+        const contents = fs.readFileSync(envFilePath, 'utf8')
+        for (const rawLine of contents.split(/\r?\n/)) {
+            const line = rawLine.trim()
+            if (!line || line.startsWith('#')) continue
+            const separatorIndex = line.indexOf('=')
+            if (separatorIndex === -1) continue
+            const key = line.slice(0, separatorIndex).trim()
+            if (!key || Object.prototype.hasOwnProperty.call(process.env, key)) {
+                continue
+            }
+            let value = line.slice(separatorIndex + 1)
+            // Remove optional surrounding quotes
+            value = value.trim()
+            if (
+                (value.startsWith('"') && value.endsWith('"')) ||
+                (value.startsWith("'") && value.endsWith("'"))
+            ) {
+                value = value.slice(1, -1)
+            }
+            process.env[key] = value
+        }
+    } catch (error) {
+        console.warn(`Failed to load environment variables from ${envFilePath}:`, error)
+    }
+}
+
 const app = express()
 app.use(cors())
 app.use(express.json())
@@ -190,6 +219,27 @@ const parseInteger = (value) => {
         return int > 0 ? int : null
     }
     return null
+}
+
+const parseBooleanFlag = (value, { defaultValue = null } = {}) => {
+    if (value === undefined) return defaultValue
+    if (value === null) return false
+    if (typeof value === 'boolean') return value
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value)) return defaultValue
+        return value !== 0
+    }
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase()
+        if (!normalized) return defaultValue
+        if (['1', 'true', 'yes', 'y', 'on', 'locked'].includes(normalized)) {
+            return true
+        }
+        if (['0', 'false', 'no', 'n', 'off', 'unlock'].includes(normalized)) {
+            return false
+        }
+    }
+    return defaultValue
 }
 
 const parseSuggestedAsk = (value) => {
@@ -653,13 +703,23 @@ class UnauthorizedError extends Error {
 
 const DEFAULT_MANAGER_PASSWORD = '10231972Fn*'
 const managerPasswordHash = process.env.MANAGER_PASSWORD_HASH || null
+const hasManagerPasswordEnv = process.env.MANAGER_PASSWORD != null
+const allowDefaultManagerPassword = process.env.NODE_ENV === 'test'
+
+if (!managerPasswordHash && !hasManagerPasswordEnv) {
+    const message = 'Manager password not configured. Set MANAGER_PASSWORD or MANAGER_PASSWORD_HASH before starting the server.'
+    if (allowDefaultManagerPassword) {
+        console.warn(`${message} Using built-in test password because NODE_ENV is "test".`)
+    } else {
+        throw new Error(message)
+    }
+}
+
 const managerPassword = managerPasswordHash
     ? null
-    : process.env.MANAGER_PASSWORD ?? DEFAULT_MANAGER_PASSWORD
-
-if (!managerPasswordHash && process.env.MANAGER_PASSWORD == null) {
-    console.log('Using built-in manager password. Set MANAGER_PASSWORD or MANAGER_PASSWORD_HASH to override the default.')
-}
+    : hasManagerPasswordEnv
+        ? process.env.MANAGER_PASSWORD
+        : DEFAULT_MANAGER_PASSWORD
 
 const verifyManagerPassword = (password) => {
     if (managerPasswordHash) {
@@ -827,6 +887,8 @@ try {
 const DONORS_TABLE_COLUMNS_SQL = `
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     client_id INTEGER,
+    exclusive_donor INTEGER DEFAULT 0,
+    exclusive_client_id INTEGER,
     name TEXT NOT NULL,
     first_name TEXT,
     last_name TEXT,
@@ -847,7 +909,8 @@ const DONORS_TABLE_COLUMNS_SQL = `
     bio TEXT,
     photo_url TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE SET NULL
+    FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE SET NULL,
+    FOREIGN KEY(exclusive_client_id) REFERENCES clients(id) ON DELETE SET NULL
 `
 
 const GIVING_HISTORY_TABLE_COLUMNS_SQL = `
@@ -879,6 +942,8 @@ const DONOR_ASSIGNMENTS_TABLE_COLUMNS_SQL = `
 const DONORS_COLUMN_ORDER = [
     'id',
     'client_id',
+    'exclusive_donor',
+    'exclusive_client_id',
     'name',
     'first_name',
     'last_name',
@@ -1577,7 +1642,36 @@ app.get('/api/manager/donors', authenticateManager, (req, res) => {
 app.post('/api/manager/assign-donor', authenticateManager, (req, res) => {
     const { clientId, donorId, priority = 1 } = req.body
 
+    const numericClientId = Number(clientId)
+    const numericDonorId = Number(donorId)
+    if (!Number.isInteger(numericClientId) || !Number.isInteger(numericDonorId)) {
+        return res.status(400).json({ error: 'Invalid assignment request' })
+    }
+
     try {
+        const donor = db
+            .prepare('SELECT exclusive_donor, exclusive_client_id FROM donors WHERE id = ?')
+            .get(numericDonorId)
+        if (!donor) {
+            return res.status(404).json({ error: 'Donor not found' })
+        }
+
+        if (donor.exclusive_donor) {
+            if (donor.exclusive_client_id && donor.exclusive_client_id !== numericClientId) {
+                return res.status(409).json({ error: 'Donor is locked to another campaign' })
+            }
+
+            db.prepare(`
+                UPDATE donor_assignments
+                SET is_active = 0
+                WHERE donor_id = ? AND client_id != ?
+            `).run(numericDonorId, numericClientId)
+
+            db.prepare(
+                'UPDATE donors SET exclusive_client_id = ? WHERE id = ? AND exclusive_client_id IS NULL'
+            ).run(numericClientId, numericDonorId)
+        }
+
         const stmt = db.prepare(`
             INSERT INTO donor_assignments (client_id, donor_id, priority_level, assigned_by, is_active)
             VALUES (?, ?, ?, ?, 1)
@@ -1586,7 +1680,7 @@ app.post('/api/manager/assign-donor', authenticateManager, (req, res) => {
                 assigned_by = excluded.assigned_by,
                 is_active = 1
         `)
-        const result = stmt.run(clientId, donorId, priority, 'manager')
+        const result = stmt.run(numericClientId, numericDonorId, priority, 'manager')
 
         res.json({ success: true, assignmentId: result.lastInsertRowid })
     } catch (error) {
@@ -1599,12 +1693,25 @@ app.delete('/api/manager/assign-donor/:clientId/:donorId', authenticateManager, 
     const { clientId, donorId } = req.params
 
     try {
+        const numericClientId = Number(clientId)
+        const numericDonorId = Number(donorId)
+        if (!Number.isInteger(numericClientId) || !Number.isInteger(numericDonorId)) {
+            return res.status(400).json({ error: 'Invalid assignment request' })
+        }
+
+        const donor = db
+            .prepare('SELECT exclusive_donor, exclusive_client_id FROM donors WHERE id = ?')
+            .get(numericDonorId)
+        if (donor && donor.exclusive_donor && donor.exclusive_client_id === numericClientId) {
+            return res.status(409).json({ error: 'Exclusive donors cannot be removed from their locked campaign' })
+        }
+
         const stmt = db.prepare(`
-            UPDATE donor_assignments 
-            SET is_active = 0 
+            UPDATE donor_assignments
+            SET is_active = 0
             WHERE client_id = ? AND donor_id = ?
         `)
-        stmt.run(clientId, donorId)
+        stmt.run(numericClientId, numericDonorId)
 
         res.json({ success: true })
     } catch (error) {
@@ -1617,6 +1724,41 @@ app.post('/api/manager/bulk-assign', authenticateManager, (req, res) => {
     const { clientId, donorIds, priority = 1 } = req.body
 
     try {
+        const numericClientId = Number(clientId)
+        if (!Number.isInteger(numericClientId)) {
+            return res.status(400).json({ error: 'Invalid assignment request' })
+        }
+
+        const uniqueDonorIds = Array.isArray(donorIds) ? donorIds : []
+        const numericDonorIds = uniqueDonorIds
+            .map((value) => Number(value))
+            .filter((value) => Number.isInteger(value))
+        if (!numericDonorIds.length) {
+            return res.status(400).json({ error: 'No donors selected for assignment' })
+        }
+
+        for (const donorId of numericDonorIds) {
+            const donor = db
+                .prepare('SELECT exclusive_donor, exclusive_client_id FROM donors WHERE id = ?')
+                .get(donorId)
+            if (!donor) {
+                return res.status(404).json({ error: `Donor ${donorId} not found` })
+            }
+            if (donor.exclusive_donor) {
+                if (donor.exclusive_client_id && donor.exclusive_client_id !== numericClientId) {
+                    return res
+                        .status(409)
+                        .json({ error: 'One or more donors are locked to another campaign' })
+                }
+                db.prepare(
+                    'UPDATE donor_assignments SET is_active = 0 WHERE donor_id = ? AND client_id != ?'
+                ).run(donorId, numericClientId)
+                db.prepare(
+                    'UPDATE donors SET exclusive_client_id = ? WHERE id = ? AND exclusive_client_id IS NULL'
+                ).run(numericClientId, donorId)
+            }
+        }
+
         const stmt = db.prepare(`
             INSERT INTO donor_assignments (client_id, donor_id, priority_level, assigned_by, is_active)
             VALUES (?, ?, ?, ?, 1)
@@ -1627,13 +1769,13 @@ app.post('/api/manager/bulk-assign', authenticateManager, (req, res) => {
         `)
 
         const transaction = db.transaction(() => {
-            donorIds.forEach(donorId => {
-                stmt.run(clientId, donorId, priority, 'manager')
+            numericDonorIds.forEach(donorId => {
+                stmt.run(numericClientId, donorId, priority, 'manager')
             })
         })
 
         transaction()
-        res.json({ success: true, assigned: donorIds.length })
+        res.json({ success: true, assigned: numericDonorIds.length })
     } catch (error) {
         res.status(500).json({ error: error.message })
     }
@@ -2604,7 +2746,7 @@ app.post('/api/donors', authenticateManager, (req, res) => {
         return res.status(400).json({ error: 'At least one client assignment is required' })
     }
 
-    const numericClientIds = assignedClientIds
+    let numericClientIds = assignedClientIds
         .map((value) => Number(value))
         .filter((value) => Number.isInteger(value) && value > 0)
     if (!numericClientIds.length) {
@@ -2620,11 +2762,18 @@ app.post('/api/donors', authenticateManager, (req, res) => {
     try {
         const stmt = db.prepare(`
             INSERT INTO donors (
-                client_id, name, first_name, last_name, phone, email,
+                client_id, exclusive_donor, exclusive_client_id,
+                name, first_name, last_name, phone, email,
                 street_address, address_line2, city, state, postal_code,
                 employer, occupation, job_title, tags, suggested_ask, last_gift_note,
                 notes, bio, photo_url
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (
+                ?, ?, ?,
+                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?,
+                ?, ?, ?
+            )
         `)
 
         const street = cleanString(payload.street ?? payload.streetAddress)
@@ -2635,6 +2784,8 @@ app.post('/api/donors', authenticateManager, (req, res) => {
 
         const result = stmt.run(
             ownerClientId,
+            exclusiveDonor ? 1 : 0,
+            exclusiveClientId,
             name,
             payload.firstName || null,
             payload.lastName || null,
@@ -2728,6 +2879,49 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
         const stateValue = stateInput === undefined ? existing.state : cleanString(stateInput)
         const postalValue = postalInput === undefined ? existing.postal_code : cleanString(postalInput)
 
+        const exclusiveDonorInput = payload.exclusiveDonor
+        const exclusiveClientInput =
+            payload.exclusiveClientId ?? payload.exclusiveClient ?? payload.exclusive_client_id
+
+        const exclusiveDonor = parseBooleanFlag(exclusiveDonorInput, {
+            defaultValue: Boolean(existing.exclusive_donor),
+        })
+
+        let exclusiveClientId
+        if (exclusiveClientInput !== undefined) {
+            if (exclusiveClientInput === null || exclusiveClientInput === '') {
+                exclusiveClientId = null
+            } else {
+                const parsedExclusive = parseInteger(exclusiveClientInput)
+                if (parsedExclusive === null) {
+                    return res.status(400).json({ error: 'Exclusive donor assignment is invalid' })
+                }
+                exclusiveClientId = parsedExclusive
+            }
+        } else {
+            exclusiveClientId = existing.exclusive_client_id || null
+        }
+
+        let resolvedExclusiveClientId = exclusiveDonor ? exclusiveClientId : null
+        if (exclusiveDonor) {
+            if (resolvedExclusiveClientId === null) {
+                const fallback = db
+                    .prepare(
+                        `SELECT client_id FROM donor_assignments WHERE donor_id = ? AND is_active = 1 ORDER BY assigned_date LIMIT 1`
+                    )
+                    .get(donorId)
+                if (fallback && fallback.client_id) {
+                    resolvedExclusiveClientId = fallback.client_id
+                }
+            }
+            if (resolvedExclusiveClientId === null) {
+                resolvedExclusiveClientId = existing.client_id || null
+            }
+            if (resolvedExclusiveClientId === null) {
+                return res.status(400).json({ error: 'Exclusive donors must be assigned to a single client' })
+            }
+        }
+
         const stmt = db.prepare(`
             UPDATE donors
             SET name = ?,
@@ -2748,32 +2942,58 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
                 last_gift_note = ?,
                 notes = ?,
                 bio = ?,
-                photo_url = ?
+                photo_url = ?,
+                exclusive_donor = ?,
+                exclusive_client_id = ?
             WHERE id = ?
         `)
 
-        stmt.run(
-            name,
-            firstName || null,
-            lastName || null,
-            payload.phone ?? existing.phone,
-            payload.email ?? existing.email,
-            streetValue,
-            addressLine2Value,
-            cityValue,
-            stateValue,
-            postalValue,
-            payload.company ?? existing.employer,
-            payload.industry ?? existing.occupation,
-            jobTitle,
-            payload.tags ?? existing.tags,
-            suggestedAsk,
-            payload.lastGift ?? existing.last_gift_note,
-            payload.notes ?? existing.notes,
-            payload.biography ?? existing.bio,
-            payload.pictureUrl ?? existing.photo_url,
-            donorId
-        )
+        const runUpdate = db.transaction(() => {
+            stmt.run(
+                name,
+                firstName || null,
+                lastName || null,
+                payload.phone ?? existing.phone,
+                payload.email ?? existing.email,
+                streetValue,
+                addressLine2Value,
+                cityValue,
+                stateValue,
+                postalValue,
+                payload.company ?? existing.employer,
+                payload.industry ?? existing.occupation,
+                jobTitle,
+                payload.tags ?? existing.tags,
+                suggestedAsk,
+                payload.lastGift ?? existing.last_gift_note,
+                payload.notes ?? existing.notes,
+                payload.biography ?? existing.bio,
+                payload.pictureUrl ?? existing.photo_url,
+                exclusiveDonor ? 1 : 0,
+                exclusiveDonor ? resolvedExclusiveClientId : null,
+                donorId
+            )
+
+            if (exclusiveDonor && resolvedExclusiveClientId) {
+                db.prepare(
+                    'UPDATE donor_assignments SET is_active = 0 WHERE donor_id = ? AND client_id != ?'
+                ).run(donorId, resolvedExclusiveClientId)
+
+                db.prepare(`
+                    INSERT INTO donor_assignments (client_id, donor_id, assigned_by, is_active)
+                    VALUES (?, ?, ?, 1)
+                    ON CONFLICT(client_id, donor_id) DO UPDATE SET
+                        is_active = 1,
+                        assigned_by = excluded.assigned_by
+                `).run(
+                    resolvedExclusiveClientId,
+                    donorId,
+                    payload.updatedBy || payload.createdBy || 'manager'
+                )
+            }
+        })
+
+        runUpdate()
 
         const donor = getDonorDetail(donorId)
         res.json(donor)
