@@ -1599,6 +1599,10 @@ body.modal-open {
   font-size: var(--font-size-sm);
 }
 
+.donor-assignment__chip[data-exclusive="true"] {
+  font-weight: 600;
+}
+
 .donor-inline-form .assignment-grid {
   margin-top: var(--space-8);
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
