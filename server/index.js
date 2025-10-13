@@ -622,13 +622,23 @@ class UnauthorizedError extends Error {
 
 const DEFAULT_MANAGER_PASSWORD = '10231972Fn*'
 const managerPasswordHash = process.env.MANAGER_PASSWORD_HASH || null
+const hasManagerPasswordEnv = process.env.MANAGER_PASSWORD != null
+const allowDefaultManagerPassword = process.env.NODE_ENV === 'test'
+
+if (!managerPasswordHash && !hasManagerPasswordEnv) {
+    const message = 'Manager password not configured. Set MANAGER_PASSWORD or MANAGER_PASSWORD_HASH before starting the server.'
+    if (allowDefaultManagerPassword) {
+        console.warn(`${message} Using built-in test password because NODE_ENV is "test".`)
+    } else {
+        throw new Error(message)
+    }
+}
+
 const managerPassword = managerPasswordHash
     ? null
-    : process.env.MANAGER_PASSWORD ?? DEFAULT_MANAGER_PASSWORD
-
-if (!managerPasswordHash && process.env.MANAGER_PASSWORD == null) {
-    console.log('Using built-in manager password. Set MANAGER_PASSWORD or MANAGER_PASSWORD_HASH to override the default.')
-}
+    : hasManagerPasswordEnv
+        ? process.env.MANAGER_PASSWORD
+        : DEFAULT_MANAGER_PASSWORD
 
 const verifyManagerPassword = (password) => {
     if (managerPasswordHash) {
