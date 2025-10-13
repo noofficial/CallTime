@@ -11,6 +11,17 @@ const app = express()
 app.use(cors())
 app.use(express.json())
 
+// Prevent cached API responses from serving stale donor data
+app.use((req, res, next) => {
+    if (req.path && req.path.startsWith('/api/')) {
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+        res.set('Pragma', 'no-cache')
+        res.set('Expires', '0')
+        res.set('Surrogate-Control', 'no-store')
+    }
+    next()
+})
+
 // Serve static files from the public directory
 app.use(express.static(path.join(__dirname, '..', 'public')))
 
