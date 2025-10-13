@@ -37,7 +37,25 @@ function ensureIntegrationDatabase() {
       client_id INTEGER,
       name TEXT,
       exclusive_donor INTEGER DEFAULT 0,
-      exclusive_client_id INTEGER
+      exclusive_client_id INTEGER,
+      first_name TEXT,
+      last_name TEXT,
+      phone TEXT,
+      email TEXT,
+      street_address TEXT,
+      address_line2 TEXT,
+      city TEXT,
+      state TEXT,
+      postal_code TEXT,
+      employer TEXT,
+      occupation TEXT,
+      job_title TEXT,
+      tags TEXT,
+      suggested_ask REAL,
+      last_gift_note TEXT,
+      notes TEXT,
+      bio TEXT,
+      photo_url TEXT
     );
     CREATE TABLE IF NOT EXISTS donor_assignments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
