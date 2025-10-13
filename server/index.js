@@ -952,6 +952,38 @@ const CLIENT_DONOR_RESEARCH_TABLE_COLUMNS_SQL = `
     UNIQUE(client_id, donor_id, research_category)
 `
 
+const CALL_OUTCOMES_TABLE_COLUMNS_SQL = `
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    donor_id INTEGER NOT NULL,
+    call_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    status TEXT NOT NULL,
+    outcome_notes TEXT,
+    follow_up_date DATE,
+    pledge_amount REAL,
+    contribution_amount REAL,
+    next_action TEXT,
+    call_duration INTEGER,
+    call_quality INTEGER CHECK(call_quality >= 1 AND call_quality <= 5),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY(donor_id) REFERENCES donors(id) ON DELETE CASCADE
+`
+
+const CLIENT_DONOR_NOTES_TABLE_COLUMNS_SQL = `
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    donor_id INTEGER NOT NULL,
+    note_type TEXT NOT NULL DEFAULT 'general',
+    note_content TEXT,
+    is_private BOOLEAN DEFAULT 1,
+    is_important BOOLEAN DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY(donor_id) REFERENCES donors(id) ON DELETE CASCADE
+`
+
 const DONORS_COLUMN_ORDER = [
     'id',
     'client_id',
@@ -1001,6 +1033,22 @@ const DONOR_ASSIGNMENTS_COLUMN_ORDER = [
     'assignment_notes',
 ]
 
+const CALL_OUTCOMES_COLUMN_ORDER = [
+    'id',
+    'client_id',
+    'donor_id',
+    'call_date',
+    'status',
+    'outcome_notes',
+    'follow_up_date',
+    'pledge_amount',
+    'contribution_amount',
+    'next_action',
+    'call_duration',
+    'call_quality',
+    'created_at',
+]
+
 const CLIENT_DONOR_RESEARCH_COLUMN_ORDER = [
     'id',
     'client_id',
@@ -1010,6 +1058,22 @@ const CLIENT_DONOR_RESEARCH_COLUMN_ORDER = [
     'created_at',
     'updated_at',
 ]
+
+const CLIENT_DONOR_NOTES_COLUMN_ORDER = [
+    'id',
+    'client_id',
+    'donor_id',
+    'note_type',
+    'note_content',
+    'is_private',
+    'is_important',
+    'created_at',
+    'updated_at',
+]
+
+const quoteIdentifier = (identifier) => `"${String(identifier).replace(/"/g, '""')}"`
+
+const quoteLiteral = (value) => `'${String(value).replace(/'/g, "''")}'`
 
 const schemaEntryExists = (name, type = 'table') => {
     try {
@@ -1049,6 +1113,168 @@ const deleteFromTableIfExists = (table, whereClause, params = []) => {
         }
 
         throw error
+    }
+}
+
+const replaceLegacyDonorReferencesInTable = (tableName) => {
+    let foreignKeysInitiallyEnabled = 0
+
+    try {
+        if (!schemaEntryExists(tableName, 'table')) {
+            return false
+        }
+
+        const foreignKeys = db
+            .prepare(`PRAGMA foreign_key_list(${quoteIdentifier(tableName)})`)
+            .all()
+        const referencesLegacy = foreignKeys.some((fk) => fk.table === 'donors_legacy')
+
+        if (!referencesLegacy) {
+            return false
+        }
+
+        const tableDefinition = db
+            .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
+            .get(tableName)
+
+        if (!tableDefinition?.sql) {
+            console.warn(
+                `Unable to rebuild ${tableName} table because its schema definition is missing.`
+            )
+            return false
+        }
+
+        const columnInfo = db
+            .prepare(`PRAGMA table_info(${quoteIdentifier(tableName)})`)
+            .all()
+        const columns = columnInfo.map((column) => column.name)
+
+        const indexes = db
+            .prepare(
+                "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL"
+            )
+            .all(tableName)
+
+        const updatedTableSql = tableDefinition.sql.replace(/donors_legacy/gi, 'donors')
+
+        const createTableSql = updatedTableSql.replace(
+            /CREATE TABLE\s+(IF NOT EXISTS\s+)?("[^"]+"|'[^']+'|`[^`]+`|\[[^\]]+\]|\w+)/i,
+            (match, ifNotExistsSegment = '', nameSegment = '') => {
+                const prefix = ifNotExistsSegment ?? ''
+                const leadingChar = nameSegment?.[0] ?? ''
+
+                if (leadingChar === '"') {
+                    return `CREATE TABLE ${prefix}"${tableName}_new"`
+                }
+
+                if (leadingChar === "'") {
+                    return `CREATE TABLE ${prefix}'${tableName}_new'`
+                }
+
+                if (leadingChar === '`') {
+                    return `CREATE TABLE ${prefix}\`${tableName}_new\``
+                }
+
+                if (leadingChar === '[') {
+                    return `CREATE TABLE ${prefix}[${tableName}_new]`
+                }
+
+                return `CREATE TABLE ${prefix}${tableName}_new`
+            }
+        )
+
+        if (createTableSql === updatedTableSql) {
+            console.warn(
+                `Unable to prepare CREATE TABLE statement for ${tableName} when updating donor references.`
+            )
+            return false
+        }
+
+        foreignKeysInitiallyEnabled = disableForeignKeysForMigration()
+
+        db.exec(`DROP TABLE IF EXISTS ${quoteIdentifier(`${tableName}_new`)}`)
+        db.exec(createTableSql)
+
+        if (columns.length) {
+            const columnList = columns.map((name) => quoteIdentifier(name)).join(', ')
+            db.exec(
+                `INSERT INTO ${quoteIdentifier(`${tableName}_new`)} (${columnList}) SELECT ${columnList} FROM ${quoteIdentifier(tableName)}`
+            )
+        }
+
+        db.exec(`DROP TABLE ${quoteIdentifier(tableName)}`)
+        db.exec(
+            `ALTER TABLE ${quoteIdentifier(`${tableName}_new`)} RENAME TO ${quoteIdentifier(tableName)}`
+        )
+
+        for (const index of indexes) {
+            if (!index?.sql) {
+                continue
+            }
+
+            try {
+                db.exec(index.sql)
+            } catch (error) {
+                console.warn(`Failed to recreate index on ${tableName}:`, error.message)
+            }
+        }
+
+        if (tableDefinition.sql.toUpperCase().includes('AUTOINCREMENT')) {
+            const primaryKeyColumn = columnInfo.find((column) => column.pk)
+
+            if (primaryKeyColumn) {
+                try {
+                    db.exec(
+                        `UPDATE sqlite_sequence SET seq = COALESCE((SELECT MAX(${quoteIdentifier(
+                            primaryKeyColumn.name
+                        )}) FROM ${quoteIdentifier(tableName)}), 0) WHERE name = ${quoteLiteral(
+                            tableName
+                        )}`
+                    )
+                } catch (error) {
+                    console.warn(
+                        `Unable to update sqlite_sequence for ${tableName}:`,
+                        error.message
+                    )
+                }
+            }
+        }
+
+        console.log(`Updated ${tableName} table to reference donors directly.`)
+        return true
+    } catch (error) {
+        console.error(`Failed to update ${tableName} table:`, error.message)
+        return false
+    } finally {
+        if (foreignKeysInitiallyEnabled) {
+            try {
+                db.pragma('foreign_keys = ON')
+            } catch (error) {
+                console.warn(
+                    `Unable to re-enable foreign keys after ${tableName} rebuild:`,
+                    error.message
+                )
+            }
+        }
+    }
+}
+
+const rebuildRemainingLegacyDonorReferences = () => {
+    try {
+        const tables = db
+            .prepare(
+                `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '%_new' AND name NOT IN ('donors', 'donors_legacy')`
+            )
+            .all()
+
+        for (const { name } of tables) {
+            replaceLegacyDonorReferencesInTable(name)
+        }
+    } catch (error) {
+        console.warn(
+            'Unable to inspect schema for lingering donors_legacy references:',
+            error.message
+        )
     }
 }
 
@@ -1258,6 +1484,61 @@ const rebuildLegacyDonorAssignments = () => {
     }
 }
 
+const rebuildLegacyCallOutcomes = () => {
+    let foreignKeysInitiallyEnabled = 0
+
+    try {
+        if (!schemaEntryExists('call_outcomes', 'table')) {
+            return
+        }
+
+        const foreignKeys = db.prepare('PRAGMA foreign_key_list(call_outcomes)').all()
+        const referencesLegacy = foreignKeys.some((fk) => fk.table === 'donors_legacy')
+
+        if (!referencesLegacy) {
+            return
+        }
+
+        foreignKeysInitiallyEnabled = disableForeignKeysForMigration()
+
+        const info = db.prepare('PRAGMA table_info(call_outcomes)').all()
+        const availableColumns = info.map((column) => column.name)
+        const transferableColumns = CALL_OUTCOMES_COLUMN_ORDER.filter((column) =>
+            availableColumns.includes(column)
+        )
+
+        db.exec('DROP TABLE IF EXISTS call_outcomes_new')
+        db.exec(`CREATE TABLE call_outcomes_new (${CALL_OUTCOMES_TABLE_COLUMNS_SQL})`)
+
+        if (transferableColumns.length) {
+            const columnList = transferableColumns.join(', ')
+            db.exec(
+                `INSERT INTO call_outcomes_new (${columnList}) SELECT ${columnList} FROM call_outcomes`
+            )
+        }
+
+        db.exec('DROP TABLE call_outcomes')
+        db.exec('ALTER TABLE call_outcomes_new RENAME TO call_outcomes')
+        db.exec('CREATE INDEX IF NOT EXISTS idx_call_outcomes_client ON call_outcomes(client_id)')
+        db.exec('CREATE INDEX IF NOT EXISTS idx_call_outcomes_donor ON call_outcomes(donor_id)')
+
+        console.log('Updated call_outcomes table to reference donors directly.')
+    } catch (error) {
+        console.error('Failed to rebuild call_outcomes table:', error.message)
+    } finally {
+        if (foreignKeysInitiallyEnabled) {
+            try {
+                db.pragma('foreign_keys = ON')
+            } catch (error) {
+                console.warn(
+                    'Unable to re-enable foreign keys after call_outcomes rebuild:',
+                    error.message
+                )
+            }
+        }
+    }
+}
+
 const rebuildLegacyClientDonorResearch = () => {
     let foreignKeysInitiallyEnabled = 0
 
@@ -1314,6 +1595,63 @@ const rebuildLegacyClientDonorResearch = () => {
     }
 }
 
+const rebuildLegacyClientDonorNotes = () => {
+    let foreignKeysInitiallyEnabled = 0
+
+    try {
+        if (!schemaEntryExists('client_donor_notes', 'table')) {
+            return
+        }
+
+        const foreignKeys = db.prepare('PRAGMA foreign_key_list(client_donor_notes)').all()
+        const referencesLegacy = foreignKeys.some((fk) => fk.table === 'donors_legacy')
+
+        if (!referencesLegacy) {
+            return
+        }
+
+        foreignKeysInitiallyEnabled = disableForeignKeysForMigration()
+
+        const info = db.prepare('PRAGMA table_info(client_donor_notes)').all()
+        const availableColumns = info.map((column) => column.name)
+        const transferableColumns = CLIENT_DONOR_NOTES_COLUMN_ORDER.filter((column) =>
+            availableColumns.includes(column)
+        )
+
+        db.exec('DROP TABLE IF EXISTS client_donor_notes_new')
+        db.exec(`CREATE TABLE client_donor_notes_new (${CLIENT_DONOR_NOTES_TABLE_COLUMNS_SQL})`)
+
+        if (transferableColumns.length) {
+            const columnList = transferableColumns.join(', ')
+            db.exec(
+                `INSERT INTO client_donor_notes_new (${columnList}) SELECT ${columnList} FROM client_donor_notes`
+            )
+        }
+
+        db.exec('DROP TABLE client_donor_notes')
+        db.exec('ALTER TABLE client_donor_notes_new RENAME TO client_donor_notes')
+        db.exec('CREATE INDEX IF NOT EXISTS idx_client_donor_notes ON client_donor_notes(client_id, donor_id)')
+        db.exec(
+            'CREATE INDEX IF NOT EXISTS idx_client_donor_notes_lookup ON client_donor_notes(client_id, donor_id)'
+        )
+
+        console.log('Updated client_donor_notes table to reference donors directly.')
+    } catch (error) {
+        console.error('Failed to rebuild client_donor_notes table:', error.message)
+    } finally {
+        if (foreignKeysInitiallyEnabled) {
+            try {
+                db.pragma('foreign_keys = ON')
+            } catch (error) {
+                console.warn(
+                    'Unable to re-enable foreign keys after client_donor_notes rebuild:',
+                    error.message
+                )
+            }
+        }
+    }
+}
+
 const migrateDonorsTable = () => {
     let foreignKeysInitiallyEnabled = 0
 
@@ -1362,7 +1700,10 @@ const migrateDonorsTable = () => {
 
         rebuildLegacyGivingHistory()
         rebuildLegacyDonorAssignments()
+        rebuildLegacyCallOutcomes()
         rebuildLegacyClientDonorResearch()
+        rebuildLegacyClientDonorNotes()
+        rebuildRemainingLegacyDonorReferences()
     } catch (error) {
         console.error('Failed to update donors table schema:', error.message)
     } finally {
@@ -1416,35 +1757,12 @@ ${DONORS_TABLE_COLUMNS_SQL}
 
             -- Enhanced call outcomes with better categorization
             CREATE TABLE IF NOT EXISTS call_outcomes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                client_id INTEGER NOT NULL,
-                donor_id INTEGER NOT NULL,
-                call_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-                status TEXT NOT NULL,
-                outcome_notes TEXT,
-                follow_up_date DATE,
-                pledge_amount REAL,
-                contribution_amount REAL,
-                next_action TEXT,
-                call_duration INTEGER, -- seconds
-                call_quality INTEGER CHECK(call_quality >= 1 AND call_quality <= 5),
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,
-                FOREIGN KEY(donor_id) REFERENCES donors(id) ON DELETE CASCADE
+            ${CALL_OUTCOMES_TABLE_COLUMNS_SQL}
             );
 
             -- Client-specific donor notes (completely isolated)
             CREATE TABLE IF NOT EXISTS client_donor_notes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                client_id INTEGER NOT NULL,
-                donor_id INTEGER NOT NULL,
-                note_type TEXT NOT NULL DEFAULT 'general',
-                note_content TEXT NOT NULL,
-                is_private BOOLEAN DEFAULT true,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,
-                FOREIGN KEY(donor_id) REFERENCES donors(id) ON DELETE CASCADE
+            ${CLIENT_DONOR_NOTES_TABLE_COLUMNS_SQL}
             );
 
             -- Giving history for contribution tracking
