@@ -581,11 +581,24 @@ function renderQueue() {
     const isCompleted = !["Not Contacted", "No Answer - Left Message", "No Answer - No Message"].includes(status);
     card.className = `queue-item ${isCompleted ? "completed" : ""}`;
     card.setAttribute("data-donor-id", donor.id);
+    const employer = donor.company || donor.employer || "";
+    const jobTitle = donor.job_title || donor.title || "";
+    let professional = "";
+    if (jobTitle && employer) {
+      professional = `${jobTitle} @ ${employer}`;
+    } else if (jobTitle) {
+      professional = jobTitle;
+    } else if (employer) {
+      professional = employer;
+    } else {
+      professional = "Unknown employer";
+    }
+
     card.innerHTML = `
       <div class="queue-donor-info">
         <div class="queue-donor-name">${donor.name || `${donor.first_name || ""} ${donor.last_name || ""}`.trim() || "Unnamed donor"}</div>
         <div class="queue-donor-details">
-          ${(donor.company || donor.employer || "Unknown employer")} • ${donor.phone || "No phone"} • Capacity: $${formatCurrency(
+          ${professional} • ${donor.phone || "No phone"} • Capacity: $${formatCurrency(
             donor.capacity || donor.suggested_ask || 0,
           )}
         </div>
@@ -643,6 +656,7 @@ function renderDonorDetails(details) {
       ${renderInfoItem("Phone", details.phone || "No phone on file")}
       ${renderInfoItem("Email", details.email || "No email on file")}
       ${renderInfoItem("Employer", details.company || details.employer || "Unknown")}
+      ${renderInfoItem("Title", details.job_title || details.title || "Unknown")}
       ${renderInfoItem("City", details.city || "Unknown")}
       ${renderInfoItem("Industry", details.industry || details.occupation || "Unknown")}
       ${renderInfoItem("Giving capacity", `$${formatCurrency(details.capacity || details.suggested_ask || 0)}`)}
