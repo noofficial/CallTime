@@ -1822,6 +1822,8 @@ ${DONORS_TABLE_COLUMNS_SQL}
         `)
         migrateDonorsTable()
         normalizeExistingDonorClientIds()
+        ensureColumn('donors', 'exclusive_donor', 'exclusive_donor INTEGER DEFAULT 0')
+        ensureColumn('donors', 'exclusive_client_id', 'exclusive_client_id INTEGER')
         ensureColumn('donors', 'first_name', 'first_name TEXT')
         ensureColumn('donors', 'last_name', 'last_name TEXT')
         ensureColumn('donors', 'job_title', 'job_title TEXT')
