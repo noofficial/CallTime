@@ -939,6 +939,19 @@ const DONOR_ASSIGNMENTS_TABLE_COLUMNS_SQL = `
     UNIQUE(client_id, donor_id)
 `
 
+const CLIENT_DONOR_RESEARCH_TABLE_COLUMNS_SQL = `
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    donor_id INTEGER NOT NULL,
+    research_category TEXT NOT NULL,
+    research_content TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY(donor_id) REFERENCES donors(id) ON DELETE CASCADE,
+    UNIQUE(client_id, donor_id, research_category)
+`
+
 const DONORS_COLUMN_ORDER = [
     'id',
     'client_id',
@@ -986,6 +999,16 @@ const DONOR_ASSIGNMENTS_COLUMN_ORDER = [
     'custom_ask_amount',
     'is_active',
     'assignment_notes',
+]
+
+const CLIENT_DONOR_RESEARCH_COLUMN_ORDER = [
+    'id',
+    'client_id',
+    'donor_id',
+    'research_category',
+    'research_content',
+    'created_at',
+    'updated_at',
 ]
 
 const schemaEntryExists = (name, type = 'table') => {
@@ -1235,6 +1258,62 @@ const rebuildLegacyDonorAssignments = () => {
     }
 }
 
+const rebuildLegacyClientDonorResearch = () => {
+    let foreignKeysInitiallyEnabled = 0
+
+    try {
+        if (!schemaEntryExists('client_donor_research', 'table')) {
+            return
+        }
+
+        const foreignKeys = db.prepare('PRAGMA foreign_key_list(client_donor_research)').all()
+        const referencesLegacy = foreignKeys.some((fk) => fk.table === 'donors_legacy')
+
+        if (!referencesLegacy) {
+            return
+        }
+
+        foreignKeysInitiallyEnabled = disableForeignKeysForMigration()
+
+        const info = db.prepare('PRAGMA table_info(client_donor_research)').all()
+        const availableColumns = info.map((column) => column.name)
+        const transferableColumns = CLIENT_DONOR_RESEARCH_COLUMN_ORDER.filter((column) =>
+            availableColumns.includes(column)
+        )
+
+        db.exec('DROP TABLE IF EXISTS client_donor_research_new')
+        db.exec(`CREATE TABLE client_donor_research_new (${CLIENT_DONOR_RESEARCH_TABLE_COLUMNS_SQL})`)
+
+        if (transferableColumns.length) {
+            const columnList = transferableColumns.join(', ')
+            db.exec(
+                `INSERT INTO client_donor_research_new (${columnList}) SELECT ${columnList} FROM client_donor_research`
+            )
+        }
+
+        db.exec('DROP TABLE client_donor_research')
+        db.exec('ALTER TABLE client_donor_research_new RENAME TO client_donor_research')
+        db.exec(
+            'CREATE INDEX IF NOT EXISTS idx_client_donor_research ON client_donor_research(client_id, donor_id)'
+        )
+
+        console.log('Updated client_donor_research table to reference donors directly.')
+    } catch (error) {
+        console.error('Failed to rebuild client_donor_research table:', error.message)
+    } finally {
+        if (foreignKeysInitiallyEnabled) {
+            try {
+                db.pragma('foreign_keys = ON')
+            } catch (error) {
+                console.warn(
+                    'Unable to re-enable foreign keys after client_donor_research rebuild:',
+                    error.message
+                )
+            }
+        }
+    }
+}
+
 const migrateDonorsTable = () => {
     let foreignKeysInitiallyEnabled = 0
 
@@ -1283,6 +1362,7 @@ const migrateDonorsTable = () => {
 
         rebuildLegacyGivingHistory()
         rebuildLegacyDonorAssignments()
+        rebuildLegacyClientDonorResearch()
     } catch (error) {
         console.error('Failed to update donors table schema:', error.message)
     } finally {
@@ -2536,14 +2616,14 @@ app.delete('/api/clients/:clientId', authenticateManager, (req, res) => {
             return res.status(404).json({ error: 'Client not found' })
         }
 
-        console.log('Starting deletion of client', clientId)
+        const assignmentsTableExists = schemaEntryExists('donor_assignments', 'table')
+        const donorsTableHasClientId = tableHasColumn('donors', 'client_id')
 
         const removeClient = db.transaction((id) => {
             let donorIdsForClient = []
 
             if (assignmentsTableExists) {
                 try {
-                    console.log('Loading donor assignments for client', id)
                     const donorRows = db
                         .prepare('SELECT donor_id FROM donor_assignments WHERE client_id = ?')
                         .all(id)
@@ -2558,19 +2638,13 @@ app.delete('/api/clients/:clientId', authenticateManager, (req, res) => {
                 }
             }
 
-            console.log('Deleting donor_assignments for client', id)
             deleteFromTableIfExists('donor_assignments', 'WHERE client_id = ?', [id])
-            console.log('Deleting client_donor_research for client', id)
             deleteFromTableIfExists('client_donor_research', 'WHERE client_id = ?', [id])
-            console.log('Deleting client_donor_notes for client', id)
             deleteFromTableIfExists('client_donor_notes', 'WHERE client_id = ?', [id])
-            console.log('Deleting call_outcomes for client', id)
             deleteFromTableIfExists('call_outcomes', 'WHERE client_id = ?', [id])
-            console.log('Deleting call_sessions for client', id)
             deleteFromTableIfExists('call_sessions', 'WHERE client_id = ?', [id])
 
             if (donorsTableHasClientId) {
-                console.log('Deleting donors with client_id', id)
                 deleteFromTableIfExists('donors', 'WHERE client_id = ?', [id])
             }
 
@@ -2581,7 +2655,6 @@ app.delete('/api/clients/:clientId', authenticateManager, (req, res) => {
                 if (placeholders) {
                     let stillAssigned = []
                     try {
-                        console.log('Checking remaining assignments for donors', uniqueDonorIds)
                         const rows = db
                             .prepare(
                                 `SELECT donor_id FROM donor_assignments WHERE donor_id IN (${placeholders})`
@@ -2603,7 +2676,6 @@ app.delete('/api/clients/:clientId', authenticateManager, (req, res) => {
                     )
 
                     if (removableDonorIds.length) {
-                        console.log('Deleting unassigned donors', removableDonorIds)
                         const removePlaceholders = removableDonorIds.map(() => '?').join(', ')
                         deleteFromTableIfExists(
                             'donors',
@@ -2614,7 +2686,6 @@ app.delete('/api/clients/:clientId', authenticateManager, (req, res) => {
                 }
             }
 
-            console.log('Deleting client', id)
             db.prepare('DELETE FROM clients WHERE id = ?').run(id)
         })
 
@@ -2713,19 +2784,12 @@ app.delete('/api/donors/:donorId', authenticateManager, (req, res) => {
         console.log('Starting deletion of donor', donorId)
 
         const removeDonor = db.transaction((id) => {
-            console.log('Deleting donor_assignments for', id)
             deleteFromTableIfExists('donor_assignments', 'WHERE donor_id = ?', [id])
-            console.log('Deleting client_donor_research for', id)
             deleteFromTableIfExists('client_donor_research', 'WHERE donor_id = ?', [id])
-            console.log('Deleting client_donor_notes for', id)
             deleteFromTableIfExists('client_donor_notes', 'WHERE donor_id = ?', [id])
-            console.log('Deleting call_outcomes for', id)
             deleteFromTableIfExists('call_outcomes', 'WHERE donor_id = ?', [id])
-            console.log('Deleting giving_history for', id)
             deleteFromTableIfExists('giving_history', 'WHERE donor_id = ?', [id])
-            console.log('Deleting interactions for', id)
             deleteFromTableIfExists('interactions', 'WHERE donor_id = ?', [id])
-            console.log('Deleting donor', id)
             db.prepare('DELETE FROM donors WHERE id = ?').run(id)
         })
 
