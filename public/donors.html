@@ -155,6 +155,26 @@
               <h2>Professional &amp; location</h2>
               <div class="editor-grid">
                 <div class="form-row">
+                  <label class="form-label" for="editor-street">Street address</label>
+                  <input class="input" id="editor-street" name="street" autocomplete="address-line1" />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="editor-address-line-2">Address line 2</label>
+                  <input class="input" id="editor-address-line-2" name="addressLine2" autocomplete="address-line2" />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="editor-city">City</label>
+                  <input class="input" id="editor-city" name="city" autocomplete="address-level2" />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="editor-state">State / Region</label>
+                  <input class="input" id="editor-state" name="state" autocomplete="address-level1" />
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="editor-postal-code">Postal code</label>
+                  <input class="input" id="editor-postal-code" name="postalCode" autocomplete="postal-code" />
+                </div>
+                <div class="form-row">
                   <label class="form-label" for="editor-company">Company</label>
                   <input class="input" id="editor-company" name="company" />
                 </div>
@@ -165,10 +185,6 @@
                 <div class="form-row">
                   <label class="form-label" for="editor-industry">Industry</label>
                   <input class="input" id="editor-industry" name="industry" />
-                </div>
-                <div class="form-row">
-                  <label class="form-label" for="editor-city">City</label>
-                  <input class="input" id="editor-city" name="city" />
                 </div>
                 <div class="form-row">
                   <label class="form-label" for="editor-tags">Tags</label>
@@ -233,6 +249,8 @@
                   />
                   <label class="sr-only" for="history-candidate">Candidate</label>
                   <input class="input" id="history-candidate" name="historyCandidate" placeholder="Candidate name" />
+                  <label class="sr-only" for="history-office">Office sought</label>
+                  <input class="input" id="history-office" name="historyOffice" placeholder="Office sought" />
                   <label class="sr-only" for="history-amount">Amount</label>
                   <input
                     class="input"

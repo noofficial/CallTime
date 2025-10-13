@@ -584,6 +584,10 @@ function applyDonorFilter() {
       donor.last_name,
       donor.company,
       donor.city,
+      donor.state,
+      donor.postal_code,
+      donor.street_address,
+      donor.address_line2,
       donor.industry,
       donor.email,
       donor.phone,
@@ -611,8 +615,13 @@ function renderDonors() {
     row.className = "donor-item donor-item--row";
 
     const name = donor.name || `${donor.first_name || ""} ${donor.last_name || ""}`.trim() || "Unnamed donor";
-    const city = donor.city ? donor.city : "";
     const company = donor.company || donor.employer || "";
+    const street = donor.street_address ? donor.street_address : "";
+    const addressLine2 = donor.address_line2 ? donor.address_line2 : "";
+    const locality = [donor.city, donor.state].filter(Boolean).join(", ");
+    const postalCode = donor.postal_code ? donor.postal_code : "";
+    const location = locality ? (postalCode ? `${locality} ${postalCode}` : locality) : postalCode;
+    const addressSummary = [street, addressLine2, location].filter(Boolean).join(", ");
     const capacity = donor.capacity || donor.suggested_ask || 0;
     const assignments = donor.assigned_clients
       ? donor.assigned_clients.split(",").map((item) => item.trim()).filter(Boolean)
@@ -623,7 +632,7 @@ function renderDonors() {
         <div class="donor-name">${name}</div>
         <div class="donor-details">
           ${company ? `${company}` : "Unknown employer"}
-          ${city ? ` • ${city}` : ""}
+          ${addressSummary ? ` • ${addressSummary}` : ""}
           ${capacity ? ` • Capacity: $${Number(capacity).toLocaleString()}` : ""}
         </div>
         <div class="donor-tags">${renderTags(donor.tags)}</div>
