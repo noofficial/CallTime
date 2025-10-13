@@ -2536,14 +2536,14 @@ app.delete('/api/clients/:clientId', authenticateManager, (req, res) => {
             return res.status(404).json({ error: 'Client not found' })
         }
 
-        const assignmentsTableExists = schemaEntryExists('donor_assignments', 'table')
-        const donorsTableHasClientId = tableHasColumn('donors', 'client_id')
+        console.log('Starting deletion of client', clientId)
 
         const removeClient = db.transaction((id) => {
             let donorIdsForClient = []
 
             if (assignmentsTableExists) {
                 try {
+                    console.log('Loading donor assignments for client', id)
                     const donorRows = db
                         .prepare('SELECT donor_id FROM donor_assignments WHERE client_id = ?')
                         .all(id)
@@ -2558,13 +2558,19 @@ app.delete('/api/clients/:clientId', authenticateManager, (req, res) => {
                 }
             }
 
+            console.log('Deleting donor_assignments for client', id)
             deleteFromTableIfExists('donor_assignments', 'WHERE client_id = ?', [id])
+            console.log('Deleting client_donor_research for client', id)
             deleteFromTableIfExists('client_donor_research', 'WHERE client_id = ?', [id])
+            console.log('Deleting client_donor_notes for client', id)
             deleteFromTableIfExists('client_donor_notes', 'WHERE client_id = ?', [id])
+            console.log('Deleting call_outcomes for client', id)
             deleteFromTableIfExists('call_outcomes', 'WHERE client_id = ?', [id])
+            console.log('Deleting call_sessions for client', id)
             deleteFromTableIfExists('call_sessions', 'WHERE client_id = ?', [id])
 
             if (donorsTableHasClientId) {
+                console.log('Deleting donors with client_id', id)
                 deleteFromTableIfExists('donors', 'WHERE client_id = ?', [id])
             }
 
@@ -2575,6 +2581,7 @@ app.delete('/api/clients/:clientId', authenticateManager, (req, res) => {
                 if (placeholders) {
                     let stillAssigned = []
                     try {
+                        console.log('Checking remaining assignments for donors', uniqueDonorIds)
                         const rows = db
                             .prepare(
                                 `SELECT donor_id FROM donor_assignments WHERE donor_id IN (${placeholders})`
@@ -2596,6 +2603,7 @@ app.delete('/api/clients/:clientId', authenticateManager, (req, res) => {
                     )
 
                     if (removableDonorIds.length) {
+                        console.log('Deleting unassigned donors', removableDonorIds)
                         const removePlaceholders = removableDonorIds.map(() => '?').join(', ')
                         deleteFromTableIfExists(
                             'donors',
@@ -2606,12 +2614,14 @@ app.delete('/api/clients/:clientId', authenticateManager, (req, res) => {
                 }
             }
 
+            console.log('Deleting client', id)
             db.prepare('DELETE FROM clients WHERE id = ?').run(id)
         })
 
         removeClient(clientId)
         res.json({ success: true })
     } catch (error) {
+        console.error('Error deleting client:', error)
         res.status(500).json({ error: error.message })
     }
 })
@@ -2700,19 +2710,29 @@ app.delete('/api/donors/:donorId', authenticateManager, (req, res) => {
             return res.status(404).json({ error: 'Donor not found' })
         }
 
+        console.log('Starting deletion of donor', donorId)
+
         const removeDonor = db.transaction((id) => {
+            console.log('Deleting donor_assignments for', id)
             deleteFromTableIfExists('donor_assignments', 'WHERE donor_id = ?', [id])
+            console.log('Deleting client_donor_research for', id)
             deleteFromTableIfExists('client_donor_research', 'WHERE donor_id = ?', [id])
+            console.log('Deleting client_donor_notes for', id)
             deleteFromTableIfExists('client_donor_notes', 'WHERE donor_id = ?', [id])
+            console.log('Deleting call_outcomes for', id)
             deleteFromTableIfExists('call_outcomes', 'WHERE donor_id = ?', [id])
+            console.log('Deleting giving_history for', id)
             deleteFromTableIfExists('giving_history', 'WHERE donor_id = ?', [id])
+            console.log('Deleting interactions for', id)
             deleteFromTableIfExists('interactions', 'WHERE donor_id = ?', [id])
+            console.log('Deleting donor', id)
             db.prepare('DELETE FROM donors WHERE id = ?').run(id)
         })
 
         removeDonor(donorId)
         res.json({ success: true })
     } catch (error) {
+        console.error('Error deleting donor:', error)
         res.status(500).json({ error: error.message })
     }
 })

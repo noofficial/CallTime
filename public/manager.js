@@ -817,8 +817,11 @@ function renderAssignmentLists() {
 }
 
 function removeClientLocally(clientId) {
+  console.log("Removing client locally", clientId);
   const targetId = String(clientId);
+  console.log("Before filter, clients length", state.clients.length);
   state.clients = state.clients.filter((client) => String(client.id) !== targetId);
+  console.log("After filter, clients length", state.clients.length);
 
   if (String(state.selectedClientId) === targetId) {
     state.selectedClientId = "";
@@ -860,8 +863,12 @@ async function handleDeleteClient(clientId) {
   );
   if (!confirmed) return;
 
+  console.log("Deleting client", clientId);
+
   try {
+    console.log("Sending DELETE request to server");
     const response = await managerFetch(`/api/clients/${clientId}`, { method: "DELETE" });
+    console.log("Response received", response.ok, response.status);
     if (!response.ok) throw new Error("Unable to delete client");
 
     removeClientLocally(clientId);
@@ -873,7 +880,8 @@ async function handleDeleteClient(clientId) {
     }
     await Promise.all(refreshTasks);
   } catch (error) {
-    reportError(error);
+    console.error(error);
+    alert(error.message || "An unexpected error occurred.");
   }
 }
 
@@ -885,6 +893,8 @@ async function handleDeleteDonor(donorId) {
     `Delete ${name}? This will remove the donor and all related history. This action cannot be undone.`,
   );
   if (!confirmed) return;
+
+  console.log("Deleting donor", donorId);
 
   try {
     const response = await managerFetch(`/api/donors/${donorId}`, { method: "DELETE" });
@@ -899,7 +909,8 @@ async function handleDeleteDonor(donorId) {
     }
     await Promise.all(refreshTasks);
   } catch (error) {
-    reportError(error);
+    console.error(error);
+    alert(error.message || "An unexpected error occurred.");
   }
 }
 

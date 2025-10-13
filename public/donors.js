@@ -1588,12 +1588,14 @@ async function handleDeleteDonor(donorId) {
     `Delete ${name}? This will remove the donor and all related history. This action cannot be undone.`,
   );
   if (!confirmed) return;
+  console.log("Deleting donor", donorId);
   try {
     await fetchJson(`/api/donors/${donorId}`, { method: "DELETE" });
     state.donorDetails.delete(donorId);
     await refreshData({ donorId: null, preserveDraft: false });
   } catch (error) {
     console.error("Failed to delete donor", error);
+    alert("Failed to delete donor: " + (error.message || "Unknown error"));
   }
 }
 
