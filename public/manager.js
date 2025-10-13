@@ -386,7 +386,7 @@ async function loadDonors() {
 async function loadAssignmentsForClient(clientId) {
   try {
     state.loadingAssignments = true;
-    const response = await managerFetch(`/api/client/${clientId}/donors`);
+    const response = await managerFetch(`/api/clients/${clientId}/donors-legacy`);
     if (!response.ok) throw new Error("Unable to load assignments for client");
     const donors = await response.json();
     state.selectedClientId = clientId;
