@@ -82,6 +82,26 @@ function ensureIntegrationDatabase() {
       call_duration INTEGER,
       call_quality INTEGER
     );
+    CREATE TABLE IF NOT EXISTS client_donor_research (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_id INTEGER NOT NULL,
+      donor_id INTEGER NOT NULL,
+      research_category TEXT NOT NULL,
+      research_content TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS client_donor_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_id INTEGER NOT NULL,
+      donor_id INTEGER NOT NULL,
+      note_type TEXT NOT NULL,
+      note_content TEXT,
+      is_private BOOLEAN DEFAULT 1,
+      is_important BOOLEAN DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   db.exec(`
