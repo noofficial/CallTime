@@ -355,9 +355,9 @@ async function selectDonor(donorId) {
   }
 }
 
-async function ensureDonorDetail(donorId) {
+async function ensureDonorDetail(donorId, { force = false } = {}) {
   if (!donorId) return;
-  if (state.donorDetails.has(donorId)) return;
+  if (!force && state.donorDetails.has(donorId)) return;
   state.loadingDetailFor = donorId;
   render();
   try {
@@ -1349,7 +1349,7 @@ async function addHistoryEntry(donorId, yearInput, candidateInput, officeInput, 
     candidateInput.value = "";
     if (officeInput) officeInput.value = "";
     amountInput.value = "";
-    await refreshData({ donorId, preserveDraft: true, skipClients: true });
+    await refreshData({ donorId, preserveDraft: true, skipClients: true, forceDetail: true });
   } catch (error) {
     console.error("Failed to add contribution", error);
   }
@@ -1377,7 +1377,7 @@ async function updateHistoryEntry(donorId, entryId, yearInput, candidateInput, o
       body: JSON.stringify(payload),
     });
     state.historyEdit = null;
-    await refreshData({ donorId, preserveDraft: true, skipClients: true });
+    await refreshData({ donorId, preserveDraft: true, skipClients: true, forceDetail: true });
   } catch (error) {
     console.error("Failed to update contribution", error);
   }
@@ -1390,7 +1390,7 @@ async function removeHistoryEntry(donorId, entryId) {
       state.historyEdit = null;
     }
     await fetchJson(`/api/donors/${donorId}/giving/${entryId}`, { method: "DELETE" });
-    await refreshData({ donorId, preserveDraft: true, skipClients: true });
+    await refreshData({ donorId, preserveDraft: true, skipClients: true, forceDetail: true });
   } catch (error) {
     console.error("Failed to remove contribution", error);
   }
@@ -1412,7 +1412,12 @@ async function handleDeleteDonor(donorId) {
   }
 }
 
-async function refreshData({ donorId = state.selectedDonorId, preserveDraft = false, skipClients = false } = {}) {
+async function refreshData({
+  donorId = state.selectedDonorId,
+  preserveDraft = false,
+  skipClients = false,
+  forceDetail = false,
+} = {}) {
   try {
     const donors = await fetchJson("/api/manager/donors");
     if (Array.isArray(donors)) {
@@ -1430,7 +1435,7 @@ async function refreshData({ donorId = state.selectedDonorId, preserveDraft = fa
     const isActiveDonor = Boolean(donorId && state.filtered.some((item) => item.id === donorId));
     if (isActiveDonor) {
       state.selectedDonorId = donorId;
-      await ensureDonorDetail(donorId);
+      await ensureDonorDetail(donorId, { force: forceDetail });
       const detail = state.donorDetails.get(donorId);
       if (detail) {
         if (preserveDraft && state.detailDraft && state.detailDraft.id === donorId) {
@@ -1446,7 +1451,7 @@ async function refreshData({ donorId = state.selectedDonorId, preserveDraft = fa
     } else {
       state.selectedDonorId = state.filtered.length ? state.filtered[0].id : null;
       if (state.selectedDonorId) {
-        await ensureDonorDetail(state.selectedDonorId);
+        await ensureDonorDetail(state.selectedDonorId, { force: forceDetail });
         const detail = state.donorDetails.get(state.selectedDonorId);
         if (detail) {
           if (preserveDraft && state.detailDraft && state.detailDraft.id === state.selectedDonorId) {
