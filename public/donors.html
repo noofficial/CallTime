@@ -27,6 +27,7 @@
           <div class="database-header__actions">
             <a class="btn btn--ghost" href="index.html">Back to workspace</a>
             <a class="btn" id="export-donors" href="#">Export JSON</a>
+            <button class="btn btn--ghost" type="button" id="open-giving-insights">Giving insights</button>
             <button class="btn btn--primary" type="button" id="open-donor-modal">New donor</button>
           </div>
         </div>
@@ -74,6 +75,36 @@
           </section>
         </div>
       </main>
+    </div>
+
+    <div class="insights-panel hidden" id="giving-insights" aria-hidden="true">
+      <div class="insights-panel__overlay" data-insights-dismiss></div>
+      <div
+        class="insights-panel__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="giving-insights-title"
+      >
+        <header class="insights-panel__header">
+          <div>
+            <p class="eyebrow">Contribution insights</p>
+            <h2 class="insights-panel__title" id="giving-insights-title">Contribution insights</h2>
+            <p class="muted" id="giving-insights-subtitle"></p>
+          </div>
+          <button class="insights-panel__close" type="button" aria-label="Close insights" data-insights-dismiss>
+            &times;
+          </button>
+        </header>
+        <nav class="insights-panel__tabs" aria-label="Insights mode">
+          <button class="insights-panel__tab" type="button" data-insights-tab="candidate">
+            Candidate summary
+          </button>
+          <button class="insights-panel__tab" type="button" data-insights-tab="search">
+            Amount search
+          </button>
+        </nav>
+        <div class="insights-panel__body" id="giving-insights-body"></div>
+      </div>
     </div>
 
     <div
