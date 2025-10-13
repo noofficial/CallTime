@@ -213,6 +213,12 @@ const parseCurrency = (value) => {
     return null
 }
 
+const parseNonNegativeNumber = (value) => {
+    const parsed = parseCurrency(value)
+    if (parsed === null) return null
+    return parsed >= 0 ? parsed : null
+}
+
 const parseCityStatePostal = (value) => {
     const cleaned = cleanString(value)
     if (!cleaned) return null
