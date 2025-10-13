@@ -4,7 +4,8 @@
   "description": "CallTime Desk is an internal call-time workspace for campaign finance consultants.\r Create a dedicated donor queue for each client, pull profiles from Google Sheets or\r CSV exports, and log outcomes that remain private to the active campaign.",
   "main": "index.js",
   "scripts": {
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "test": "node server/tests/assignment.test.js"
   },
   "repository": {
     "type": "git",
