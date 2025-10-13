@@ -433,6 +433,7 @@ function updateEditClientButton() {
 }
 
 function renderClients() {
+  console.log("renderClients called, currentClientId:", state.currentClientId, "clients length:", state.clients.length);
   const container = elements.clients;
   if (!container) return;
   if (elements.clientSelector) {
