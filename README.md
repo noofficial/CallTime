@@ -23,14 +23,23 @@ CSV exports, and log outcomes that remain private to the active campaign.
 
 ## Running the workspace locally
 
-This is a static web application. Start any HTTP server and open `index.html` in
-your browser:
+The manager workspace and donor upload tools run from the bundled Node server.
+Make sure you have Node.js 18 or newer installed, then install the project
+dependencies (this is required any time `package.json` changes):
 
 ```bash
-python -m http.server 8000
+npm install
 ```
 
-Then navigate to <http://localhost:8000>.
+Once dependencies are installed you can start the API and front end with:
+
+```bash
+npm start
+```
+
+Visit <http://localhost:3000> to use the app. If `npm start` reports a missing
+module such as `multer` or `xlsx`, run `npm install` again to pull the latest
+dependencies before restarting the server.
 
 ## Authentication
 
@@ -69,6 +78,29 @@ header to review and edit the profiles attached to the selected campaign.
 All changes save instantly to the local database for the active client. Notes
 and outcome logs remain private to each campaign, so overlapping prospects never
 share information between clients.
+
+## Bulk donor import
+
+The manager workspace includes a drag-and-drop importer for CSV or Excel files.
+Matching column headers update donor records, while unrecognized headers are
+skipped automatically.
+
+- **Core donor fields:** `Name`, `First Name`, `Last Name`, `Email`, `Phone`,
+  `City`, `Employer`, `Occupation`, `Suggested Ask`, `Last Gift`, `Tags`,
+  `Notes`, and `Photo URL` map to the donor profile.
+- **Campaign assignment:** include `Client ID`, `Client`, or `Campaign` to assign
+  donors to a specific workspace. Leave the column out (or select **No client**)
+  to keep donors unassigned after import.
+- **Contribution history:** add `Contribution Year`, `Contribution Candidate`,
+  and `Contribution Amount` columns to append a single giving record per row.
+  To load multiple entries for the same donor, number the headers (for example,
+  `Contribution 2 Year`, `Contribution 2 Candidate`, `Contribution 2 Amount`).
+  Each complete triplet is linked to the donor automatically, and duplicates are
+  skipped so the history stays clean.
+
+The status message that appears after an import callout summarizes how many
+donors were inserted, updated, or skipped, along with how many contributions
+were created or ignored.
 
 ## Connecting a Google Sheet
 
