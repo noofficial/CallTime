@@ -1192,9 +1192,10 @@ const migrateDonorsTable = () => {
                 console.log('Recreated donors table because schema inspection failed.')
             } else {
                 const clientIdColumn = info.find((column) => column.name === 'client_id')
+                const clientIdMissing = !clientIdColumn
                 const clientIdIsRequired = clientIdColumn && clientIdColumn.notnull !== 0
 
-                if (clientIdIsRequired) {
+                if (clientIdMissing || clientIdIsRequired) {
                     foreignKeysInitiallyEnabled = disableForeignKeysForMigration()
 
                     const migrate = db.transaction(() => {
@@ -1203,7 +1204,10 @@ const migrateDonorsTable = () => {
 
                     migrate()
 
-                    console.log('Updated donors table to allow unassigned donors.')
+                    const reason = clientIdMissing
+                        ? 'add missing client_id column'
+                        : 'allow unassigned donors'
+                    console.log(`Updated donors table to ${reason}.`)
                 }
             }
         }
