@@ -781,6 +781,17 @@ const DONORS_TABLE_COLUMNS_SQL = `
     FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE SET NULL
 `
 
+const GIVING_HISTORY_TABLE_COLUMNS_SQL = `
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    donor_id INTEGER NOT NULL,
+    year INTEGER NOT NULL,
+    candidate TEXT NOT NULL,
+    office_sought TEXT,
+    amount REAL NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(donor_id) REFERENCES donors(id) ON DELETE CASCADE
+`
+
 const DONOR_ASSIGNMENTS_TABLE_COLUMNS_SQL = `
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     client_id INTEGER NOT NULL,
@@ -818,6 +829,16 @@ const DONORS_COLUMN_ORDER = [
     'notes',
     'bio',
     'photo_url',
+    'created_at',
+]
+
+const GIVING_HISTORY_COLUMN_ORDER = [
+    'id',
+    'donor_id',
+    'year',
+    'candidate',
+    'office_sought',
+    'amount',
     'created_at',
 ]
 
@@ -910,6 +931,63 @@ const ensureDonorsLegacyView = () => {
         db.exec('CREATE VIEW donors_legacy AS SELECT * FROM donors')
     } catch (error) {
         console.warn('Unable to ensure donors_legacy compatibility view:', error.message)
+    }
+}
+
+const rebuildLegacyGivingHistory = () => {
+    let foreignKeysInitiallyEnabled = 0
+
+    try {
+        if (!schemaEntryExists('giving_history', 'table')) {
+            return
+        }
+
+        const foreignKeys = db.prepare('PRAGMA foreign_key_list(giving_history)').all()
+        const referencesLegacy = foreignKeys.some((fk) => fk.table === 'donors_legacy')
+
+        if (!referencesLegacy) {
+            return
+        }
+
+        foreignKeysInitiallyEnabled = disableForeignKeysForMigration()
+
+        const info = db.prepare('PRAGMA table_info(giving_history)').all()
+        const availableColumns = info.map((column) => column.name)
+        const transferableColumns = GIVING_HISTORY_COLUMN_ORDER.filter((column) =>
+            availableColumns.includes(column)
+        )
+
+        db.exec('DROP TABLE IF EXISTS giving_history_new')
+        db.exec(`CREATE TABLE giving_history_new (${GIVING_HISTORY_TABLE_COLUMNS_SQL})`)
+
+        if (transferableColumns.length) {
+            const columnList = transferableColumns.join(', ')
+            db.exec(
+                `INSERT INTO giving_history_new (${columnList}) SELECT ${columnList} FROM giving_history`
+            )
+        }
+
+        db.exec('DROP TABLE giving_history')
+        db.exec('ALTER TABLE giving_history_new RENAME TO giving_history')
+
+        db.exec('CREATE INDEX IF NOT EXISTS idx_giving_history_donor ON giving_history(donor_id)')
+        db.exec(
+            'CREATE INDEX IF NOT EXISTS idx_giving_history_candidate_year ON giving_history(candidate, year)'
+        )
+        db.exec('CREATE INDEX IF NOT EXISTS idx_giving_history_year ON giving_history(year)')
+        db.exec('CREATE INDEX IF NOT EXISTS idx_giving_history_amount ON giving_history(amount)')
+
+        console.log('Updated giving_history table to reference donors directly.')
+    } catch (error) {
+        console.error('Failed to rebuild giving_history table:', error.message)
+    } finally {
+        if (foreignKeysInitiallyEnabled) {
+            try {
+                db.pragma('foreign_keys = ON')
+            } catch (error) {
+                console.warn('Unable to re-enable foreign keys after giving_history rebuild:', error.message)
+            }
+        }
     }
 }
 
@@ -1011,6 +1089,7 @@ const migrateDonorsTable = () => {
             }
         }
 
+        rebuildLegacyGivingHistory()
         rebuildLegacyDonorAssignments()
     } catch (error) {
         console.error('Failed to update donors table schema:', error.message)
