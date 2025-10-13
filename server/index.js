@@ -708,10 +708,19 @@ const clientMatchesSession = (sessionClientId, requestedClientId) => {
 const serverDbPath = path.join(__dirname, 'campaign.db')
 const dataDbPath = path.join(__dirname, '..', 'data', 'campaign.db')
 
-const candidateDatabases = [
+const candidateDatabases = []
+
+if (process.env.CALLTIME_DB_PATH) {
+    candidateDatabases.push({
+        path: process.env.CALLTIME_DB_PATH,
+        label: 'CALLTIME_DB_PATH override'
+    })
+}
+
+candidateDatabases.push(
     { path: dataDbPath, label: 'data directory' },
     { path: serverDbPath, label: 'server directory' }
-]
+)
 
 let db
 let dbPath
@@ -1781,6 +1790,38 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
     }
 })
 
+class ClientDonorAccessError extends Error {
+    constructor(status, message) {
+        super(message)
+        this.name = 'ClientDonorAccessError'
+        this.status = status
+    }
+}
+
+const findActiveClientDonorStmt = db.prepare(`
+    SELECT d.*
+    FROM donor_assignments da
+    JOIN donors d ON d.id = da.donor_id
+    WHERE da.client_id = ? AND da.donor_id = ? AND da.is_active = 1
+    LIMIT 1
+`)
+
+const findDonorByIdStmt = db.prepare('SELECT id FROM donors WHERE id = ? LIMIT 1')
+
+const ensureClientHasDonor = (clientId, donorId) => {
+    const donor = findActiveClientDonorStmt.get(clientId, donorId)
+    if (donor) {
+        return donor
+    }
+
+    const donorExists = findDonorByIdStmt.get(donorId)
+    if (!donorExists) {
+        throw new ClientDonorAccessError(404, 'Donor not found')
+    }
+
+    throw new ClientDonorAccessError(403, 'Donor not assigned to client')
+}
+
 // ==================== CLIENT API ENDPOINTS ====================
 
 // Get client's assigned donors
@@ -1827,16 +1868,12 @@ app.get('/api/client/:clientId/donor/:donorId', authenticateClient, (req, res) =
     }
 
     try {
-        // Get donor basic info
-        const donor = db.prepare('SELECT * FROM donors WHERE id = ?').get(donorId)
-        if (!donor) {
-            return res.status(404).json({ error: 'Donor not found' })
-        }
+        const donor = ensureClientHasDonor(clientId, donorId)
 
         // Get client-specific research
         const research = db.prepare(`
             SELECT research_category, research_content, updated_at
-            FROM client_donor_research 
+            FROM client_donor_research
             WHERE client_id = ? AND donor_id = ?
         `).all(clientId, donorId)
 
@@ -1870,6 +1907,9 @@ app.get('/api/client/:clientId/donor/:donorId', authenticateClient, (req, res) =
             givingHistory
         })
     } catch (error) {
+        if (error instanceof ClientDonorAccessError) {
+            return res.status(error.status).json({ error: error.message })
+        }
         res.status(500).json({ error: error.message })
     }
 })
@@ -1892,6 +1932,15 @@ app.post('/api/client/:clientId/call-outcome', authenticateClient, (req, res) =>
         callDuration,
         callQuality
     } = req.body
+
+    try {
+        ensureClientHasDonor(clientId, donorId)
+    } catch (error) {
+        if (error instanceof ClientDonorAccessError) {
+            return res.status(error.status).json({ error: error.message })
+        }
+        return res.status(500).json({ error: error.message })
+    }
 
     try {
         const stmt = db.prepare(`
@@ -1922,8 +1971,17 @@ app.post('/api/client/:clientId/donor/:donorId/research', authenticateClient, (r
     const { category, content } = req.body
 
     try {
+        ensureClientHasDonor(clientId, donorId)
+    } catch (error) {
+        if (error instanceof ClientDonorAccessError) {
+            return res.status(error.status).json({ error: error.message })
+        }
+        return res.status(500).json({ error: error.message })
+    }
+
+    try {
         const stmt = db.prepare(`
-            INSERT OR REPLACE INTO client_donor_research 
+            INSERT OR REPLACE INTO client_donor_research
             (client_id, donor_id, research_category, research_content, updated_at)
             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
         `)
@@ -1943,6 +2001,15 @@ app.post('/api/client/:clientId/donor/:donorId/notes', authenticateClient, (req,
         return res.status(403).json({ error: 'Forbidden' })
     }
     const { noteType, noteContent, isPrivate = true } = req.body
+
+    try {
+        ensureClientHasDonor(clientId, donorId)
+    } catch (error) {
+        if (error instanceof ClientDonorAccessError) {
+            return res.status(error.status).json({ error: error.message })
+        }
+        return res.status(500).json({ error: error.message })
+    }
 
     try {
         const stmt = db.prepare(`
@@ -2985,23 +3052,35 @@ app.use((req, res) => {
 })
 
 const port = process.env.PORT || 3000
-app.listen(port, () => {
-    console.log(`Enhanced Campaign Call Time System running at http://localhost:${port}`)
-    console.log(`Server directory: ${__dirname}`)
-    console.log(`Static files served from: ${path.join(__dirname, '..', 'public')}`)
-    console.log(`Database: ${dbPath}`)
+let serverInstance = null
 
-    // Check if files exist
-    const publicDir = path.join(__dirname, '..', 'public')
-    const indexFile = path.join(publicDir, 'index.html')
+if (process.env.NODE_ENV !== 'test') {
+    serverInstance = app.listen(port, () => {
+        console.log(`Enhanced Campaign Call Time System running at http://localhost:${port}`)
+        console.log(`Server directory: ${__dirname}`)
+        console.log(`Static files served from: ${path.join(__dirname, '..', 'public')}`)
+        console.log(`Database: ${dbPath}`)
 
-    console.log('\nFile check:')
-    console.log(`Public directory exists: ${fs.existsSync(publicDir)}`)
-    console.log(`index.html exists: ${fs.existsSync(indexFile)}`)
-    console.log(`Database file exists: ${fs.existsSync(dbPath)}`)
+        // Check if files exist
+        const publicDir = path.join(__dirname, '..', 'public')
+        const indexFile = path.join(publicDir, 'index.html')
 
-    if (fs.existsSync(publicDir)) {
-        const files = fs.readdirSync(publicDir)
-        console.log(`Files in public directory: ${files.join(', ')}`)
-    }
-})
+        console.log('\nFile check:')
+        console.log(`Public directory exists: ${fs.existsSync(publicDir)}`)
+        console.log(`index.html exists: ${fs.existsSync(indexFile)}`)
+        console.log(`Database file exists: ${fs.existsSync(dbPath)}`)
+
+        if (fs.existsSync(publicDir)) {
+            const files = fs.readdirSync(publicDir)
+            console.log(`Files in public directory: ${files.join(', ')}`)
+        }
+    })
+}
+
+module.exports = {
+    app,
+    db,
+    ensureClientHasDonor,
+    ClientDonorAccessError,
+    server: serverInstance
+}
