@@ -970,13 +970,19 @@ const schemaEntryExists = (name, type = 'table') => {
 }
 
 const deleteFromTableIfExists = (table, whereClause, params = []) => {
-    if (!schemaEntryExists(table, 'table')) {
-        return
-    }
-
     const clause = whereClause ? ` ${whereClause}` : ''
     const sql = `DELETE FROM ${table}${clause}`
-    db.prepare(sql).run(...params)
+
+    try {
+        db.prepare(sql).run(...params)
+        return true
+    } catch (error) {
+        if (typeof error?.message === 'string' && error.message.includes('no such table')) {
+            return false
+        }
+
+        throw error
+    }
 }
 
 const createDonorsTableStructure = () => {
@@ -2444,7 +2450,10 @@ app.put('/api/clients/:clientId', authenticateManager, (req, res) => {
 })
 
 app.delete('/api/clients/:clientId', authenticateManager, (req, res) => {
-    const clientId = req.params.clientId
+    const clientId = Number(req.params.clientId)
+    if (!Number.isInteger(clientId) || clientId <= 0) {
+        return res.status(400).json({ error: 'Invalid client id' })
+    }
 
     try {
         const existing = db.prepare('SELECT id FROM clients WHERE id = ?').get(clientId)
@@ -2458,6 +2467,7 @@ app.delete('/api/clients/:clientId', authenticateManager, (req, res) => {
             deleteFromTableIfExists('client_donor_notes', 'WHERE client_id = ?', [id])
             deleteFromTableIfExists('call_outcomes', 'WHERE client_id = ?', [id])
             deleteFromTableIfExists('call_sessions', 'WHERE client_id = ?', [id])
+            deleteFromTableIfExists('donors', 'WHERE client_id = ?', [id])
             db.prepare('DELETE FROM clients WHERE id = ?').run(id)
         })
 
@@ -2532,7 +2542,10 @@ app.post('/api/clients/:clientId/donors', authenticateManager, (req, res) => {
 })
 
 app.delete('/api/donors/:donorId', authenticateManager, (req, res) => {
-    const donorId = req.params.donorId
+    const donorId = Number(req.params.donorId)
+    if (!Number.isInteger(donorId) || donorId <= 0) {
+        return res.status(400).json({ error: 'Invalid donor id' })
+    }
 
     try {
         const existing = db.prepare('SELECT id FROM donors WHERE id = ?').get(donorId)
