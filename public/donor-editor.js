@@ -107,6 +107,7 @@ async function handleSubmit(event) {
     email: formData.get("email")?.toString().trim() || "",
     phone: formData.get("phone")?.toString().trim() || "",
     company: formData.get("company")?.toString().trim() || "",
+    title: formData.get("title")?.toString().trim() || "",
     industry: formData.get("industry")?.toString().trim() || "",
     city: formData.get("city")?.toString().trim() || "",
     tags: formData.get("tags")?.toString().trim() || "",

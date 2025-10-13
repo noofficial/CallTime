@@ -224,6 +224,7 @@ function normalizeDonorSummary(donor) {
     phone: donor.phone || "",
     city: donor.city || "",
     company: donor.employer || "",
+    title: donor.job_title || donor.title || "",
     industry: donor.occupation || "",
     tags: donor.tags || "",
     ask: Number.isNaN(askValue) ? null : askValue,
@@ -276,6 +277,7 @@ function applyFilters() {
         donor.phone,
         donor.city,
         donor.company,
+        donor.title,
         donor.industry,
         donor.tags,
       ]
@@ -469,6 +471,7 @@ function renderDonorList() {
     button.setAttribute("data-donor-id", donor.id);
     const metaParts = [];
     if (donor.city) metaParts.push(donor.city);
+    if (donor.title) metaParts.push(donor.title);
     if (donor.company) metaParts.push(donor.company);
     const assigned = state.assignments.get(donor.id) || new Set();
     const assignedCount = assigned.size;
@@ -663,6 +666,7 @@ function createDraftFromDonor(donor) {
       phone: donor.phone || "",
       city: donor.city || "",
       company: donor.company || "",
+      title: donor.title || "",
       industry: donor.industry || "",
       tags: donor.tags || "",
       ask:
@@ -687,7 +691,7 @@ function buildDraftDisplayName(values, donor) {
 }
 
 function buildDraftMeta(values) {
-  return [values.city, values.company, values.industry].filter(Boolean).join(" • ");
+  return [values.city, values.title, values.company, values.industry].filter(Boolean).join(" • ");
 }
 
 function createIdentitySection(draft) {
@@ -732,6 +736,7 @@ function createGivingSection(draft) {
   grid.className = "form-grid";
   grid.append(
     createInputField("inline-company", "company", "Company", draft.values.company),
+    createInputField("inline-title", "title", "Title / Occupation", draft.values.title),
     createInputField("inline-industry", "industry", "Industry", draft.values.industry),
     createInputField("inline-tags", "tags", "Tags", draft.values.tags, {
       placeholder: "High priority, Warm",
@@ -897,7 +902,7 @@ function handleInlineInput(event, donor, nameHeading, metaElement) {
   if (target.name === "firstName" || target.name === "lastName") {
     nameHeading.textContent = buildDraftDisplayName(state.detailDraft.values, donor);
   }
-  if (target.name === "city" || target.name === "company" || target.name === "industry") {
+  if (target.name === "city" || target.name === "title" || target.name === "company" || target.name === "industry") {
     const metaText = buildDraftMeta(state.detailDraft.values);
     metaElement.textContent = metaText;
     metaElement.hidden = !metaText;
@@ -916,6 +921,7 @@ async function handleInlineSubmit(donor) {
     phone: values.phone.trim(),
     city: values.city.trim(),
     company: values.company.trim(),
+    title: values.title.trim(),
     industry: values.industry.trim(),
     tags: values.tags.trim(),
     ask: parseNumber(values.ask),

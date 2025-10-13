@@ -50,8 +50,10 @@ const DONOR_COLUMN_MAP = new Map([
     ['organization', 'employer'],
     ['workplace', 'employer'],
     ['occupation', 'occupation'],
-    ['jobtitle', 'occupation'],
     ['profession', 'occupation'],
+    ['title', 'job_title'],
+    ['jobtitle', 'job_title'],
+    ['position', 'job_title'],
     ['bio', 'bio'],
     ['biography', 'bio'],
     ['notes', 'notes'],
@@ -279,6 +281,7 @@ const transformDonorRow = (row, fallbackClientId, clientLookup) => {
         city: cleanString(row.city),
         employer: cleanString(row.employer),
         occupation: cleanString(row.occupation),
+        job_title: cleanString(row.job_title),
         tags: cleanString(row.tags),
         suggested_ask: parseSuggestedAsk(row.suggested_ask),
         last_gift_note: cleanString(row.last_gift_note),
@@ -649,6 +652,7 @@ const enhanceSchema = () => {
         `)
         ensureColumn('donors', 'first_name', 'first_name TEXT')
         ensureColumn('donors', 'last_name', 'last_name TEXT')
+        ensureColumn('donors', 'job_title', 'job_title TEXT')
         ensureColumn('donors', 'notes', 'notes TEXT')
         ensureColumn('clients', 'candidate', 'candidate TEXT')
         ensureColumn('clients', 'office', 'office TEXT')
@@ -990,11 +994,11 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
         const insertStmt = db.prepare(`
             INSERT INTO donors (
                 client_id, name, first_name, last_name, phone, email, city,
-                employer, occupation, tags, suggested_ask, last_gift_note,
+                employer, occupation, job_title, tags, suggested_ask, last_gift_note,
                 notes, bio, photo_url
             ) VALUES (
                 @client_id, @name, @first_name, @last_name, @phone, @email, @city,
-                @employer, @occupation, @tags, @suggested_ask, @last_gift_note,
+                @employer, @occupation, @job_title, @tags, @suggested_ask, @last_gift_note,
                 @notes, @bio, @photo_url
             )
         `)
@@ -1010,6 +1014,7 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
                 city = COALESCE(@city, city),
                 employer = COALESCE(@employer, employer),
                 occupation = COALESCE(@occupation, occupation),
+                job_title = COALESCE(@job_title, job_title),
                 tags = COALESCE(@tags, tags),
                 suggested_ask = COALESCE(@suggested_ask, suggested_ask),
                 last_gift_note = COALESCE(@last_gift_note, last_gift_note),
@@ -1629,11 +1634,12 @@ app.post('/api/clients/:clientId/donors', authenticateManager, (req, res) => {
 
     try {
         const donorStmt = db.prepare(`
-            INSERT INTO donors(name,phone,email,city,employer,occupation,bio,photo_url,tags,suggested_ask,last_gift_note)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO donors(name,phone,email,city,employer,occupation,job_title,bio,photo_url,tags,suggested_ask,last_gift_note)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         `)
         const donorResult = donorStmt.run(
-            d.name, d.phone, d.email, d.city, d.employer, d.occupation, 
+            d.name, d.phone, d.email, d.city, d.employer, d.occupation,
+            d.job_title || d.title || null,
             d.bio, d.photo_url, d.tags, d.suggested_ask, d.last_gift_note
         )
 
@@ -1718,9 +1724,9 @@ app.post('/api/donors', authenticateManager, (req, res) => {
         const stmt = db.prepare(`
             INSERT INTO donors (
                 client_id, name, first_name, last_name, phone, email, city,
-                employer, occupation, tags, suggested_ask, last_gift_note,
+                employer, occupation, job_title, tags, suggested_ask, last_gift_note,
                 notes, bio, photo_url
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
 
         const result = stmt.run(
@@ -1733,6 +1739,7 @@ app.post('/api/donors', authenticateManager, (req, res) => {
             payload.city || null,
             payload.company || null,
             payload.industry || null,
+            payload.title || payload.jobTitle || null,
             payload.tags || null,
             payload.ask !== undefined && payload.ask !== null && payload.ask !== '' ? Number(payload.ask) : null,
             payload.lastGift || null,
@@ -1801,6 +1808,7 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
             payload.ask === null || payload.ask === undefined || payload.ask === ''
                 ? null
                 : Number(payload.ask)
+        const jobTitle = payload.title ?? payload.jobTitle ?? existing.job_title
 
         const stmt = db.prepare(`
             UPDATE donors
@@ -1812,6 +1820,7 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
                 city = ?,
                 employer = ?,
                 occupation = ?,
+                job_title = ?,
                 tags = ?,
                 suggested_ask = ?,
                 last_gift_note = ?,
@@ -1830,6 +1839,7 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
             payload.city ?? existing.city,
             payload.company ?? existing.employer,
             payload.industry ?? existing.occupation,
+            jobTitle,
             payload.tags ?? existing.tags,
             suggestedAsk,
             payload.lastGift ?? existing.last_gift_note,
