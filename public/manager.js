@@ -52,6 +52,7 @@ const elements = {
   clientFormGoal: document.getElementById("client-form-goal"),
   clientFormNotes: document.getElementById("client-form-notes"),
   clientFormPassword: document.getElementById("client-form-password"),
+  clientFormRequirePasswordReset: document.getElementById("client-form-require-password-reset"),
   clientFormCancel: document.getElementById("client-form-cancel"),
   clientFormStatus: document.getElementById("client-form-status"),
   clientFormSubmit: document.getElementById("client-form-submit"),
@@ -979,6 +980,8 @@ function readClientFormValues() {
 async function handleClientFormSubmit() {
   const form = elements.clientForm;
   if (!form) return;
+  const portalPassword = elements.clientFormPassword?.value.trim() || "";
+  const requirePasswordReset = elements.clientFormRequirePasswordReset?.checked ?? false;
   if (!form.reportValidity()) {
     return;
   }
@@ -1018,7 +1021,7 @@ async function handleClientFormSubmit() {
     const endpoint = isEditMode ? `/api/clients/${targetId}` : "/api/clients";
     const method = isEditMode ? "PUT" : "POST";
 
-    if (!isEditMode && portalPassword.length < 6) {
+    if (!isEditMode && portalPassword && portalPassword.length < 6) {
       setClientFormStatus("Set a password with at least 6 characters.", "error");
       elements.clientFormPassword?.focus();
       return;
@@ -1044,6 +1047,8 @@ async function handleClientFormSubmit() {
       launchDate,
       fundraisingGoal,
       notes,
+      portalPassword,
+      requirePasswordReset,
     };
 
     const response = await managerFetch(endpoint, {
@@ -1513,6 +1518,9 @@ function resetClientForm() {
   setClientFormStatus("");
   updateClientFormText();
   updateResetPasswordButtonVisibility();
+  if (elements.clientFormRequirePasswordReset) {
+    elements.clientFormRequirePasswordReset.checked = false;
+  }
 }
 
 function prepareClientForm(mode, client = null) {
@@ -1526,6 +1534,9 @@ function prepareClientForm(mode, client = null) {
   }
   if (elements.clientFormPassword) {
     elements.clientFormPassword.value = "";
+  }
+  if (elements.clientFormRequirePasswordReset) {
+    elements.clientFormRequirePasswordReset.checked = false;
   }
   updateClientFormText(client);
   updateResetPasswordButtonVisibility();
@@ -1561,6 +1572,9 @@ function populateClientFormFromRecord(client) {
   }
   if (elements.clientFormPassword) {
     elements.clientFormPassword.value = "";
+  }
+  if (elements.clientFormRequirePasswordReset) {
+    elements.clientFormRequirePasswordReset.checked = false;
   }
 }
 
@@ -1736,4 +1750,5 @@ export const __TESTING__ = {
   renderAssignmentLists,
   renderAssignmentCard,
   escapeHtml,
+  handleClientFormSubmit,
 };

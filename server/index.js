@@ -2475,7 +2475,24 @@ app.post('/api/clients', authenticateManager, (req, res) => {
     const contactPhone = sanitizeClientField(payload.contactPhone ?? payload.contact_phone)
     const launchDate = sanitizeClientField(payload.launchDate ?? payload.launch_date)
     const notes = sanitizeClientField(payload.notes)
-    const portalPasswordHash = hashPassword(DEFAULT_CLIENT_PORTAL_PASSWORD)
+    const portalPasswordInput = typeof payload.portalPassword === 'string' ? payload.portalPassword.trim() : ''
+    if (portalPasswordInput && portalPasswordInput.length < 6) {
+        return res.status(400).json({ error: 'portalPassword must be at least 6 characters' })
+    }
+
+    const requirePasswordResetFlag =
+        payload.requirePasswordReset === true || payload.require_password_reset === true
+
+    let portalPasswordHash
+    let portalPasswordNeedsReset
+
+    if (portalPasswordInput) {
+        portalPasswordHash = hashPassword(portalPasswordInput)
+        portalPasswordNeedsReset = requirePasswordResetFlag ? 1 : 0
+    } else {
+        portalPasswordHash = hashPassword(DEFAULT_CLIENT_PORTAL_PASSWORD)
+        portalPasswordNeedsReset = 1
+    }
 
     const goalInput = payload.fundraisingGoal ?? payload.fundraising_goal
     const { value: fundraisingGoal, error: goalError } = resolveFundraisingGoal(goalInput)
@@ -2498,7 +2515,7 @@ app.post('/api/clients', authenticateManager, (req, res) => {
                 portal_password,
                 portal_password_needs_reset
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
         const result = stmt.run(
             name,
@@ -2510,7 +2527,8 @@ app.post('/api/clients', authenticateManager, (req, res) => {
             launchDate,
             fundraisingGoal,
             notes,
-            portalPasswordHash
+            portalPasswordHash,
+            portalPasswordNeedsReset
         )
         res.json({ id: result.lastInsertRowid })
     } catch (error) {
@@ -2540,9 +2558,15 @@ app.put('/api/clients/:clientId', authenticateManager, (req, res) => {
     const contactPhone = sanitizeClientField(payload.contactPhone ?? payload.contact_phone)
     const launchDate = sanitizeClientField(payload.launchDate ?? payload.launch_date)
     const notes = sanitizeClientField(payload.notes)
-    const portalPasswordInput = typeof payload.portalPassword === 'string' ? payload.portalPassword.trim() : ''
+    const portalPasswordRaw = typeof payload.portalPassword === 'string' ? payload.portalPassword : ''
+    const portalPasswordInput = portalPasswordRaw.trim()
+    if (portalPasswordInput && portalPasswordInput.length < 6) {
+        return res.status(400).json({ error: 'portalPassword must be at least 6 characters' })
+    }
     const resetPortalPassword = payload.resetPortalPassword === true
-    const shouldUpdatePortalPassword = resetPortalPassword || Boolean(portalPasswordInput)
+    const requirePasswordResetFlag =
+        payload.requirePasswordReset === true || payload.require_password_reset === true
+    const shouldUpdatePortalPassword = resetPortalPassword || portalPasswordInput.length > 0
     let portalPasswordHash = null
     let portalPasswordNeedsReset = null
 
@@ -2552,7 +2576,7 @@ app.put('/api/clients/:clientId', authenticateManager, (req, res) => {
             portalPasswordNeedsReset = 1
         } else {
             portalPasswordHash = hashPassword(portalPasswordInput)
-            portalPasswordNeedsReset = payload.requirePasswordReset === true ? 1 : 0
+            portalPasswordNeedsReset = requirePasswordResetFlag ? 1 : 0
         }
     }
 
