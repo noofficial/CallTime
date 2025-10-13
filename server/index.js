@@ -952,6 +952,20 @@ const CLIENT_DONOR_RESEARCH_TABLE_COLUMNS_SQL = `
     UNIQUE(client_id, donor_id, research_category)
 `
 
+const CLIENT_DONOR_NOTES_TABLE_COLUMNS_SQL = `
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    donor_id INTEGER NOT NULL,
+    note_type TEXT NOT NULL DEFAULT 'general',
+    note_content TEXT,
+    is_private BOOLEAN DEFAULT 1,
+    is_important BOOLEAN DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY(donor_id) REFERENCES donors(id) ON DELETE CASCADE
+`
+
 const DONORS_COLUMN_ORDER = [
     'id',
     'client_id',
@@ -1007,6 +1021,18 @@ const CLIENT_DONOR_RESEARCH_COLUMN_ORDER = [
     'donor_id',
     'research_category',
     'research_content',
+    'created_at',
+    'updated_at',
+]
+
+const CLIENT_DONOR_NOTES_COLUMN_ORDER = [
+    'id',
+    'client_id',
+    'donor_id',
+    'note_type',
+    'note_content',
+    'is_private',
+    'is_important',
     'created_at',
     'updated_at',
 ]
@@ -1314,6 +1340,63 @@ const rebuildLegacyClientDonorResearch = () => {
     }
 }
 
+const rebuildLegacyClientDonorNotes = () => {
+    let foreignKeysInitiallyEnabled = 0
+
+    try {
+        if (!schemaEntryExists('client_donor_notes', 'table')) {
+            return
+        }
+
+        const foreignKeys = db.prepare('PRAGMA foreign_key_list(client_donor_notes)').all()
+        const referencesLegacy = foreignKeys.some((fk) => fk.table === 'donors_legacy')
+
+        if (!referencesLegacy) {
+            return
+        }
+
+        foreignKeysInitiallyEnabled = disableForeignKeysForMigration()
+
+        const info = db.prepare('PRAGMA table_info(client_donor_notes)').all()
+        const availableColumns = info.map((column) => column.name)
+        const transferableColumns = CLIENT_DONOR_NOTES_COLUMN_ORDER.filter((column) =>
+            availableColumns.includes(column)
+        )
+
+        db.exec('DROP TABLE IF EXISTS client_donor_notes_new')
+        db.exec(`CREATE TABLE client_donor_notes_new (${CLIENT_DONOR_NOTES_TABLE_COLUMNS_SQL})`)
+
+        if (transferableColumns.length) {
+            const columnList = transferableColumns.join(', ')
+            db.exec(
+                `INSERT INTO client_donor_notes_new (${columnList}) SELECT ${columnList} FROM client_donor_notes`
+            )
+        }
+
+        db.exec('DROP TABLE client_donor_notes')
+        db.exec('ALTER TABLE client_donor_notes_new RENAME TO client_donor_notes')
+        db.exec('CREATE INDEX IF NOT EXISTS idx_client_donor_notes ON client_donor_notes(client_id, donor_id)')
+        db.exec(
+            'CREATE INDEX IF NOT EXISTS idx_client_donor_notes_lookup ON client_donor_notes(client_id, donor_id)'
+        )
+
+        console.log('Updated client_donor_notes table to reference donors directly.')
+    } catch (error) {
+        console.error('Failed to rebuild client_donor_notes table:', error.message)
+    } finally {
+        if (foreignKeysInitiallyEnabled) {
+            try {
+                db.pragma('foreign_keys = ON')
+            } catch (error) {
+                console.warn(
+                    'Unable to re-enable foreign keys after client_donor_notes rebuild:',
+                    error.message
+                )
+            }
+        }
+    }
+}
+
 const migrateDonorsTable = () => {
     let foreignKeysInitiallyEnabled = 0
 
@@ -1363,6 +1446,7 @@ const migrateDonorsTable = () => {
         rebuildLegacyGivingHistory()
         rebuildLegacyDonorAssignments()
         rebuildLegacyClientDonorResearch()
+        rebuildLegacyClientDonorNotes()
     } catch (error) {
         console.error('Failed to update donors table schema:', error.message)
     } finally {
@@ -1435,16 +1519,7 @@ ${DONORS_TABLE_COLUMNS_SQL}
 
             -- Client-specific donor notes (completely isolated)
             CREATE TABLE IF NOT EXISTS client_donor_notes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                client_id INTEGER NOT NULL,
-                donor_id INTEGER NOT NULL,
-                note_type TEXT NOT NULL DEFAULT 'general',
-                note_content TEXT NOT NULL,
-                is_private BOOLEAN DEFAULT true,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,
-                FOREIGN KEY(donor_id) REFERENCES donors(id) ON DELETE CASCADE
+            ${CLIENT_DONOR_NOTES_TABLE_COLUMNS_SQL}
             );
 
             -- Giving history for contribution tracking
