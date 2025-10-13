@@ -105,7 +105,17 @@ const DONOR_COLUMN_MAP = new Map([
     ['recordid', 'id'],
 ])
 
-const CONTRIBUTION_PREFIXES = ['contribution', 'giving', 'donation', 'gift']
+const CONTRIBUTION_PREFIXES = [
+    'contribution',
+    'giving',
+    'donation',
+    'gift',
+    'contributionhistory',
+    'givinghistory',
+    'donationhistory',
+    'gifthistory',
+    'history',
+]
 const CONTRIBUTION_FIELD_PATTERN = new RegExp(
     `^(?:${CONTRIBUTION_PREFIXES.join('|')})(\\d*)(year|candidate|amount|office|officesought)$`
 )
@@ -745,6 +755,278 @@ try {
 }
 
 // Enhanced schema for improved call time management
+const DONORS_TABLE_COLUMNS_SQL = `
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER,
+    name TEXT NOT NULL,
+    first_name TEXT,
+    last_name TEXT,
+    phone TEXT,
+    email TEXT,
+    street_address TEXT,
+    address_line2 TEXT,
+    city TEXT,
+    state TEXT,
+    postal_code TEXT,
+    employer TEXT,
+    occupation TEXT,
+    job_title TEXT,
+    tags TEXT,
+    suggested_ask REAL,
+    last_gift_note TEXT,
+    notes TEXT,
+    bio TEXT,
+    photo_url TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE SET NULL
+`
+
+const DONOR_ASSIGNMENTS_TABLE_COLUMNS_SQL = `
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    donor_id INTEGER NOT NULL,
+    assigned_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    assigned_by TEXT,
+    priority_level INTEGER DEFAULT 1,
+    custom_ask_amount REAL,
+    is_active BOOLEAN DEFAULT 1,
+    assignment_notes TEXT,
+    FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY(donor_id) REFERENCES donors(id) ON DELETE CASCADE,
+    UNIQUE(client_id, donor_id)
+`
+
+const DONORS_COLUMN_ORDER = [
+    'id',
+    'client_id',
+    'name',
+    'first_name',
+    'last_name',
+    'phone',
+    'email',
+    'street_address',
+    'address_line2',
+    'city',
+    'state',
+    'postal_code',
+    'employer',
+    'occupation',
+    'job_title',
+    'tags',
+    'suggested_ask',
+    'last_gift_note',
+    'notes',
+    'bio',
+    'photo_url',
+    'created_at',
+]
+
+const DONOR_ASSIGNMENTS_COLUMN_ORDER = [
+    'id',
+    'client_id',
+    'donor_id',
+    'assigned_date',
+    'assigned_by',
+    'priority_level',
+    'custom_ask_amount',
+    'is_active',
+    'assignment_notes',
+]
+
+const schemaEntryExists = (name, type = 'table') => {
+    try {
+        const stmt = db.prepare(
+            'SELECT name FROM sqlite_master WHERE type = ? AND name = ? LIMIT 1'
+        )
+        return Boolean(stmt.get(type, name))
+    } catch (error) {
+        console.warn(`Failed to inspect schema for ${type} ${name}:`, error.message)
+        return false
+    }
+}
+
+const createDonorsTableStructure = () => {
+    db.exec(`CREATE TABLE IF NOT EXISTS donors (${DONORS_TABLE_COLUMNS_SQL})`)
+    db.exec('CREATE INDEX IF NOT EXISTS idx_donors_client ON donors(client_id)')
+}
+
+const rebuildDonorsTableFromSource = (sourceTable) => {
+    const info = db.prepare(`PRAGMA table_info(${sourceTable})`).all()
+    const availableColumns = info.map((column) => column.name)
+    const transferableColumns = DONORS_COLUMN_ORDER.filter((column) =>
+        availableColumns.includes(column)
+    )
+
+    db.exec('DROP TABLE IF EXISTS donors_new')
+    db.exec(`CREATE TABLE donors_new (${DONORS_TABLE_COLUMNS_SQL})`)
+
+    if (transferableColumns.length) {
+        const columnList = transferableColumns.join(', ')
+        db.exec(
+            `INSERT INTO donors_new (${columnList}) SELECT ${columnList} FROM ${sourceTable}`
+        )
+    }
+
+    if (sourceTable !== 'donors') {
+        db.exec('DROP TABLE IF EXISTS donors')
+    }
+
+    db.exec(`DROP TABLE ${sourceTable}`)
+    db.exec('ALTER TABLE donors_new RENAME TO donors')
+    db.exec('CREATE INDEX IF NOT EXISTS idx_donors_client ON donors(client_id)')
+    db.exec(
+        `UPDATE sqlite_sequence SET seq = COALESCE((SELECT MAX(id) FROM donors), 0) WHERE name = 'donors'`
+    )
+}
+
+const disableForeignKeysForMigration = () => {
+    let wasEnabled = 0
+    try {
+        wasEnabled = db.pragma('foreign_keys', { simple: true })
+    } catch (error) {
+        console.warn('Unable to read foreign key pragma before donor migration:', error.message)
+        return 0
+    }
+
+    if (wasEnabled) {
+        try {
+            db.pragma('foreign_keys = OFF')
+        } catch (error) {
+            console.warn('Unable to disable foreign keys before donor migration:', error.message)
+            return 0
+        }
+    }
+
+    return wasEnabled
+}
+
+const ensureDonorsLegacyView = () => {
+    try {
+        if (schemaEntryExists('donors_legacy', 'table')) {
+            return
+        }
+
+        db.exec('DROP VIEW IF EXISTS donors_legacy')
+        db.exec('CREATE VIEW donors_legacy AS SELECT * FROM donors')
+    } catch (error) {
+        console.warn('Unable to ensure donors_legacy compatibility view:', error.message)
+    }
+}
+
+const rebuildLegacyDonorAssignments = () => {
+    let foreignKeysInitiallyEnabled = 0
+
+    try {
+        if (!schemaEntryExists('donor_assignments', 'table')) {
+            return
+        }
+
+        const foreignKeys = db.prepare('PRAGMA foreign_key_list(donor_assignments)').all()
+        const referencesLegacy = foreignKeys.some((fk) => fk.table === 'donors_legacy')
+
+        if (!referencesLegacy) {
+            return
+        }
+
+        foreignKeysInitiallyEnabled = disableForeignKeysForMigration()
+
+        const info = db.prepare('PRAGMA table_info(donor_assignments)').all()
+        const availableColumns = info.map((column) => column.name)
+        const transferableColumns = DONOR_ASSIGNMENTS_COLUMN_ORDER.filter((column) =>
+            availableColumns.includes(column)
+        )
+
+        db.exec('DROP TABLE IF EXISTS donor_assignments_new')
+        db.exec(`CREATE TABLE donor_assignments_new (${DONOR_ASSIGNMENTS_TABLE_COLUMNS_SQL})`)
+
+        if (transferableColumns.length) {
+            const columnList = transferableColumns.join(', ')
+            db.exec(
+                `INSERT INTO donor_assignments_new (${columnList}) SELECT ${columnList} FROM donor_assignments`
+            )
+        }
+
+        db.exec('DROP TABLE donor_assignments')
+        db.exec('ALTER TABLE donor_assignments_new RENAME TO donor_assignments')
+        db.exec('CREATE INDEX IF NOT EXISTS idx_donor_assignments_client ON donor_assignments(client_id)')
+        db.exec('CREATE INDEX IF NOT EXISTS idx_donor_assignments_donor ON donor_assignments(donor_id)')
+        db.exec('CREATE INDEX IF NOT EXISTS idx_donor_assignments_active ON donor_assignments(is_active)')
+
+        console.log('Updated donor_assignments table to reference donors directly.')
+    } catch (error) {
+        console.error('Failed to rebuild donor_assignments table:', error.message)
+    } finally {
+        if (foreignKeysInitiallyEnabled) {
+            try {
+                db.pragma('foreign_keys = ON')
+            } catch (error) {
+                console.warn(
+                    'Unable to re-enable foreign keys after donor_assignments rebuild:',
+                    error.message
+                )
+            }
+        }
+    }
+}
+
+const migrateDonorsTable = () => {
+    let foreignKeysInitiallyEnabled = 0
+
+    try {
+        const donorsExists = schemaEntryExists('donors', 'table')
+        const legacyExists = schemaEntryExists('donors_legacy', 'table')
+
+        if (!donorsExists && !legacyExists) {
+            createDonorsTableStructure()
+            console.log('Created donors table because it was missing.')
+        } else if (!donorsExists && legacyExists) {
+            foreignKeysInitiallyEnabled = disableForeignKeysForMigration()
+
+            const migrateFromLegacy = db.transaction(() => {
+                rebuildDonorsTableFromSource('donors_legacy')
+            })
+
+            migrateFromLegacy()
+            console.log('Rebuilt donors table from donors_legacy backup.')
+        } else {
+            const info = db.prepare(`PRAGMA table_info(donors)`).all()
+            if (!info.length) {
+                createDonorsTableStructure()
+                console.log('Recreated donors table because schema inspection failed.')
+            } else {
+                const clientIdColumn = info.find((column) => column.name === 'client_id')
+                const clientIdIsRequired = clientIdColumn && clientIdColumn.notnull !== 0
+
+                if (clientIdIsRequired) {
+                    foreignKeysInitiallyEnabled = disableForeignKeysForMigration()
+
+                    const migrate = db.transaction(() => {
+                        rebuildDonorsTableFromSource('donors')
+                    })
+
+                    migrate()
+
+                    console.log('Updated donors table to allow unassigned donors.')
+                }
+            }
+        }
+
+        rebuildLegacyDonorAssignments()
+    } catch (error) {
+        console.error('Failed to update donors table schema:', error.message)
+    } finally {
+        if (foreignKeysInitiallyEnabled) {
+            try {
+                db.pragma('foreign_keys = ON')
+            } catch (error) {
+                console.warn('Unable to re-enable foreign keys after donor migration:', error.message)
+            }
+        }
+
+        ensureDonorsLegacyView()
+    }
+}
+
 const ensureColumn = (table, column, definition) => {
     try {
         const existing = db.prepare(`PRAGMA table_info(${table})`).all()
@@ -762,6 +1044,11 @@ const enhanceSchema = () => {
     try {
         // Add new tables for enhanced functionality
         db.exec(`
+            CREATE TABLE IF NOT EXISTS donors (
+${DONORS_TABLE_COLUMNS_SQL}
+            );
+            CREATE INDEX IF NOT EXISTS idx_donors_client ON donors(client_id);
+
             -- Client-specific donor research (isolated per client)
             CREATE TABLE IF NOT EXISTS client_donor_research (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -834,7 +1121,9 @@ const enhanceSchema = () => {
                 assigned_date DATETIME DEFAULT CURRENT_TIMESTAMP,
                 assigned_by TEXT,
                 priority_level INTEGER DEFAULT 1,
+                custom_ask_amount REAL,
                 is_active BOOLEAN DEFAULT true,
+                assignment_notes TEXT,
                 FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,
                 FOREIGN KEY(donor_id) REFERENCES donors(id) ON DELETE CASCADE,
                 UNIQUE(client_id, donor_id)
@@ -862,6 +1151,7 @@ const enhanceSchema = () => {
             CREATE INDEX IF NOT EXISTS idx_donor_assignments_donor ON donor_assignments(donor_id);
             CREATE INDEX IF NOT EXISTS idx_call_sessions_client ON call_sessions(client_id);
         `)
+        migrateDonorsTable()
         ensureColumn('donors', 'first_name', 'first_name TEXT')
         ensureColumn('donors', 'last_name', 'last_name TEXT')
         ensureColumn('donors', 'job_title', 'job_title TEXT')
@@ -885,6 +1175,7 @@ const enhanceSchema = () => {
         ensureColumn('donor_assignments', 'is_active', 'is_active BOOLEAN DEFAULT 1')
         ensureColumn('donor_assignments', 'assigned_by', 'assigned_by TEXT')
         ensureColumn('donor_assignments', 'assignment_notes', 'assignment_notes TEXT')
+        ensureColumn('donor_assignments', 'custom_ask_amount', 'custom_ask_amount REAL')
         ensureColumn('client_donor_notes', 'note_type', "note_type TEXT NOT NULL DEFAULT 'general'")
         ensureColumn('client_donor_notes', 'note_content', 'note_content TEXT')
         ensureColumn('client_donor_notes', 'is_private', 'is_private BOOLEAN DEFAULT 1')
