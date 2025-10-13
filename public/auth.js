@@ -13,7 +13,7 @@ export class UnauthorizedError extends Error {
 }
 
 const buildOptions = (token, options = {}) => {
-  const merged = { ...options };
+  const merged = { cache: "no-store", ...options };
   merged.headers = {
     ...(options.headers || {}),
     Authorization: `Bearer ${token}`,
