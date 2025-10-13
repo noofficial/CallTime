@@ -969,6 +969,16 @@ const schemaEntryExists = (name, type = 'table') => {
     }
 }
 
+const tableHasColumn = (table, column) => {
+    try {
+        const columns = db.prepare(`PRAGMA table_info(${table})`).all()
+        return columns.some((info) => info.name === column)
+    } catch (error) {
+        console.warn(`Failed to inspect columns for ${table}:`, error.message)
+        return false
+    }
+}
+
 const deleteFromTableIfExists = (table, whereClause, params = []) => {
     const clause = whereClause ? ` ${whereClause}` : ''
     const sql = `DELETE FROM ${table}${clause}`
@@ -977,7 +987,10 @@ const deleteFromTableIfExists = (table, whereClause, params = []) => {
         db.prepare(sql).run(...params)
         return true
     } catch (error) {
-        if (typeof error?.message === 'string' && error.message.includes('no such table')) {
+        if (
+            typeof error?.message === 'string' &&
+            (error.message.includes('no such table') || error.message.includes('no such column'))
+        ) {
             return false
         }
 
@@ -2465,13 +2478,76 @@ app.delete('/api/clients/:clientId', authenticateManager, (req, res) => {
             return res.status(404).json({ error: 'Client not found' })
         }
 
+        const assignmentsTableExists = schemaEntryExists('donor_assignments', 'table')
+        const donorsTableHasClientId = tableHasColumn('donors', 'client_id')
+
         const removeClient = db.transaction((id) => {
+            let donorIdsForClient = []
+
+            if (assignmentsTableExists) {
+                try {
+                    const donorRows = db
+                        .prepare('SELECT donor_id FROM donor_assignments WHERE client_id = ?')
+                        .all(id)
+                    donorIdsForClient = donorRows.map((row) => row.donor_id)
+                } catch (error) {
+                    console.warn(
+                        'Failed to load donor assignments while deleting client',
+                        id,
+                        error.message
+                    )
+                    donorIdsForClient = []
+                }
+            }
+
             deleteFromTableIfExists('donor_assignments', 'WHERE client_id = ?', [id])
             deleteFromTableIfExists('client_donor_research', 'WHERE client_id = ?', [id])
             deleteFromTableIfExists('client_donor_notes', 'WHERE client_id = ?', [id])
             deleteFromTableIfExists('call_outcomes', 'WHERE client_id = ?', [id])
             deleteFromTableIfExists('call_sessions', 'WHERE client_id = ?', [id])
-            deleteFromTableIfExists('donors', 'WHERE client_id = ?', [id])
+
+            if (donorsTableHasClientId) {
+                deleteFromTableIfExists('donors', 'WHERE client_id = ?', [id])
+            }
+
+            if (assignmentsTableExists && donorIdsForClient.length) {
+                const uniqueDonorIds = [...new Set(donorIdsForClient)]
+                const placeholders = uniqueDonorIds.map(() => '?').join(', ')
+
+                if (placeholders) {
+                    let stillAssigned = []
+                    try {
+                        const rows = db
+                            .prepare(
+                                `SELECT donor_id FROM donor_assignments WHERE donor_id IN (${placeholders})`
+                            )
+                            .all(...uniqueDonorIds)
+                        stillAssigned = rows.map((row) => row.donor_id)
+                    } catch (error) {
+                        console.warn(
+                            'Failed to inspect remaining donor assignments while deleting client',
+                            id,
+                            error.message
+                        )
+                        stillAssigned = []
+                    }
+
+                    const stillAssignedSet = new Set(stillAssigned)
+                    const removableDonorIds = uniqueDonorIds.filter(
+                        (donorId) => !stillAssignedSet.has(donorId)
+                    )
+
+                    if (removableDonorIds.length) {
+                        const removePlaceholders = removableDonorIds.map(() => '?').join(', ')
+                        deleteFromTableIfExists(
+                            'donors',
+                            `WHERE id IN (${removePlaceholders})`,
+                            removableDonorIds
+                        )
+                    }
+                }
+            }
+
             db.prepare('DELETE FROM clients WHERE id = ?').run(id)
         })
 
@@ -2507,10 +2583,10 @@ app.post('/api/clients/:clientId/donors', authenticateManager, (req, res) => {
     try {
         const donorStmt = db.prepare(`
             INSERT INTO donors(
-                name, phone, email, street_address, address_line2, city, state, postal_code,
+                client_id, name, phone, email, street_address, address_line2, city, state, postal_code,
                 employer, occupation, job_title, bio, photo_url, tags, suggested_ask, last_gift_note
             )
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `)
         const street = cleanString(d.street_address ?? d.street)
         const addressLine2 = cleanString(d.address_line2 ?? d.addressLine2)
@@ -2518,6 +2594,7 @@ app.post('/api/clients/:clientId/donors', authenticateManager, (req, res) => {
         const state = cleanString(d.state ?? d.region)
         const postal = cleanString(d.postal_code ?? d.postalCode)
         const donorResult = donorStmt.run(
+            c,
             d.name,
             d.phone,
             d.email,
@@ -2529,7 +2606,11 @@ app.post('/api/clients/:clientId/donors', authenticateManager, (req, res) => {
             d.employer,
             d.occupation,
             d.job_title || d.title || null,
-            d.bio, d.photo_url, d.tags, d.suggested_ask, d.last_gift_note
+            d.bio,
+            d.photo_url,
+            d.tags,
+            d.suggested_ask,
+            d.last_gift_note
         )
 
         // Auto-assign to the client
