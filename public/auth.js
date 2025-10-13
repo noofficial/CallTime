@@ -12,9 +12,28 @@ export class UnauthorizedError extends Error {
   }
 }
 
+const shouldBypassCache = (options = {}) => {
+  const method = options.method ? String(options.method).toUpperCase() : "GET";
+  return method === "GET";
+};
+
+const withCacheBuster = (url, options = {}) => {
+  if (typeof url !== "string" || !shouldBypassCache(options)) {
+    return url;
+  }
+
+  const [base, hash] = url.split("#");
+  const separator = base.includes("?") ? "&" : "?";
+  const token = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const cacheSafeUrl = `${base}${separator}__nc=${token}`;
+  return hash ? `${cacheSafeUrl}#${hash}` : cacheSafeUrl;
+};
+
 const buildOptions = (token, options = {}) => {
   const merged = { cache: "no-store", ...options };
   merged.headers = {
+    "Cache-Control": "no-cache",
+    Pragma: "no-cache",
     ...(options.headers || {}),
     Authorization: `Bearer ${token}`,
   };
@@ -29,7 +48,8 @@ const fetchWithToken = async (token, url, options, onUnauthorized) => {
   if (!token) {
     throw new UnauthorizedError();
   }
-  const response = await fetch(url, buildOptions(token, options));
+  const requestUrl = withCacheBuster(url, options);
+  const response = await fetch(requestUrl, buildOptions(token, options));
   if (handleUnauthorized(response)) {
     onUnauthorized?.();
     throw new UnauthorizedError();

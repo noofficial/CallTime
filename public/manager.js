@@ -773,6 +773,42 @@ function renderAssignmentLists() {
   }
 }
 
+function removeClientLocally(clientId) {
+  const targetId = String(clientId);
+  state.clients = state.clients.filter((client) => String(client.id) !== targetId);
+
+  if (String(state.selectedClientId) === targetId) {
+    state.selectedClientId = "";
+    state.selectedClientName = "";
+    state.assignedIds = new Set();
+    state.assignedDonors = new Map();
+    if (elements.assignmentClient) {
+      elements.assignmentClient.value = "";
+    }
+  }
+
+  if (String(state.currentClientId) === targetId) {
+    state.currentClientId = "";
+    state.clientSelectionTouched = false;
+  }
+
+  ensureCurrentClientSelection();
+  renderClients();
+  populateAssignmentSelect();
+  populateBulkUploadClientSelect();
+  renderAssignmentLists();
+}
+
+function removeDonorLocally(donorId) {
+  const targetId = String(donorId);
+  state.donors = state.donors.filter((donor) => String(donor.id) !== targetId);
+  state.assignedDonors.delete(targetId);
+  state.assignedIds.delete(targetId);
+  applyDonorFilter();
+  renderDonors();
+  renderAssignmentLists();
+}
+
 async function handleDeleteClient(clientId) {
   const client = state.clients.find((item) => String(item.id) === String(clientId));
   const label = client?.name || client?.candidate || "this client";
@@ -785,23 +821,14 @@ async function handleDeleteClient(clientId) {
     const response = await managerFetch(`/api/clients/${clientId}`, { method: "DELETE" });
     if (!response.ok) throw new Error("Unable to delete client");
 
-    if (String(state.selectedClientId) === String(clientId)) {
-      state.selectedClientId = "";
-      state.selectedClientName = "";
-      state.assignedIds = new Set();
-      state.assignedDonors = new Map();
-      if (elements.assignmentClient) {
-        elements.assignmentClient.value = "";
-      }
-    }
+    removeClientLocally(clientId);
 
-    if (String(state.currentClientId) === String(clientId)) {
-      state.currentClientId = "";
-      state.clientSelectionTouched = false;
+    const refreshTasks = [loadOverview(), loadDonors()];
+    const assignmentsClientId = state.selectedClientId ? String(state.selectedClientId) : "";
+    if (assignmentsClientId) {
+      refreshTasks.push(loadAssignmentsForClient(assignmentsClientId));
     }
-
-    await loadOverview();
-    await loadDonors();
+    await Promise.all(refreshTasks);
   } catch (error) {
     reportError(error);
   }
@@ -820,8 +847,14 @@ async function handleDeleteDonor(donorId) {
     const response = await managerFetch(`/api/donors/${donorId}`, { method: "DELETE" });
     if (!response.ok) throw new Error("Unable to delete donor");
 
-    await loadOverview();
-    await loadDonors();
+    removeDonorLocally(donorId);
+
+    const refreshTasks = [loadOverview(), loadDonors()];
+    const assignmentsClientId = state.selectedClientId ? String(state.selectedClientId) : "";
+    if (assignmentsClientId) {
+      refreshTasks.push(loadAssignmentsForClient(assignmentsClientId));
+    }
+    await Promise.all(refreshTasks);
   } catch (error) {
     reportError(error);
   }
