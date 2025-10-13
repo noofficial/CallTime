@@ -1290,6 +1290,9 @@ function buildBulkUploadSummary(summary) {
   const skipped = Number(summary.skipped) || 0;
   const assigned = Number(summary.assigned) || 0;
   const unassigned = Number(summary.unassigned) || 0;
+  const contributionsAdded = Number(summary.contributionsAdded) || 0;
+  const contributionsSkipped = Number(summary.contributionsSkipped) || 0;
+  const contributionErrors = Number(summary.contributionErrors) || 0;
   const ignoredColumns = Array.isArray(summary.ignoredColumns) ? summary.ignoredColumns : [];
   const errorCount = Number(summary.errorCount) || 0;
   const errors = Array.isArray(summary.errors) ? summary.errors : [];
@@ -1316,6 +1319,17 @@ function buildBulkUploadSummary(summary) {
   if (unassigned) assignmentParts.push(`${unassigned} unassigned`);
   if (assignmentParts.length) {
     message += ` Assignments: ${assignmentParts.join(", ")}.`;
+  }
+
+  const contributionParts = [];
+  if (contributionsAdded) contributionParts.push(`${contributionsAdded} added`);
+  if (contributionsSkipped) contributionParts.push(`${contributionsSkipped} skipped`);
+  if (contributionParts.length) {
+    message += ` Contributions: ${contributionParts.join(", ")}.`;
+  }
+
+  if (contributionErrors) {
+    message += ` Contribution issues on ${contributionErrors} row${contributionErrors === 1 ? "" : "s"}.`;
   }
 
   if (errorCount > 0) {

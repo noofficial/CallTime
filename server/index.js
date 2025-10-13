@@ -78,6 +78,22 @@ const DONOR_COLUMN_MAP = new Map([
     ['recordid', 'id'],
 ])
 
+const CONTRIBUTION_PREFIXES = ['contribution', 'giving', 'donation', 'gift']
+const CONTRIBUTION_FIELD_PATTERN = new RegExp(
+    `^(?:${CONTRIBUTION_PREFIXES.join('|')})(\\d*)(year|candidate|amount)$`
+)
+
+const identifyContributionField = (normalizedKey) => {
+    if (!normalizedKey) return null
+
+    const match = normalizedKey.match(CONTRIBUTION_FIELD_PATTERN)
+    if (!match) return null
+
+    const [, slotDigits, field] = match
+    const slot = slotDigits || 'default'
+    return { slot, field }
+}
+
 const cleanString = (value) => {
     if (value === undefined || value === null) return null
     if (typeof value === 'string') {
@@ -139,18 +155,54 @@ const parseSuggestedAsk = (value) => {
     return null
 }
 
-const parseNonNegativeNumber = (value) => {
+const parseCurrency = (value) => {
     if (value === undefined || value === null) return null
     if (typeof value === 'number') {
-        return Number.isFinite(value) && value >= 0 ? Number(value) : null
+        return Number.isFinite(value) ? Number(value) : null
     }
     if (typeof value === 'string') {
-        const cleaned = value.replace(/[^0-9.+-]/g, '').trim()
+        const cleaned = value
+            .replace(/\$/g, '')
+            .replace(/,/g, '')
+            .replace(/\(/g, '-')
+            .replace(/\)/g, '')
+            .replace(/[^0-9.+-]/g, '')
+            .trim()
         if (!cleaned) return null
         const parsed = Number(cleaned)
-        return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
+        return Number.isFinite(parsed) ? parsed : null
     }
     return null
+}
+
+const transformContributionRows = (rows = []) => {
+    const entries = []
+    const errors = []
+
+    rows.forEach((row, index) => {
+        if (!row || typeof row !== 'object') return
+
+        const year = parseInteger(row.year)
+        const candidate = cleanString(row.candidate)
+        const amount = parseCurrency(row.amount)
+
+        if (year === null && !candidate && amount === null) {
+            return
+        }
+
+        if (year === null || !candidate || amount === null) {
+            const missing = []
+            if (year === null) missing.push('year')
+            if (!candidate) missing.push('candidate')
+            if (amount === null) missing.push('amount')
+            errors.push(`Contribution ${index + 1}: missing ${missing.join(', ')}`)
+            return
+        }
+
+        entries.push({ year, candidate, amount })
+    })
+
+    return { entries, errors }
 }
 
 const buildClientLookup = (clients) => {
@@ -885,10 +937,20 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
         const unknownColumns = new Set()
         const parsedRows = rows.map((row, index) => {
             const normalizedRow = {}
+            const contributionMap = new Map()
             Object.entries(row).forEach(([key, value]) => {
                 if (!key) return
                 const normalizedKey = normalizeColumnName(key)
                 if (!normalizedKey) return
+
+                const contributionField = identifyContributionField(normalizedKey)
+                if (contributionField) {
+                    const existing = contributionMap.get(contributionField.slot) || {}
+                    existing[contributionField.field] = value
+                    contributionMap.set(contributionField.slot, existing)
+                    return
+                }
+
                 const mappedColumn = DONOR_COLUMN_MAP.get(normalizedKey)
                 if (!mappedColumn) {
                     unknownColumns.add(key)
@@ -896,7 +958,19 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
                 }
                 normalizedRow[mappedColumn] = value
             })
-            return { rowNumber: index + 2, values: normalizedRow }
+
+            const contributions = Array.from(contributionMap.entries())
+                .sort((a, b) => {
+                    const rank = (slot) => {
+                        if (slot === 'default') return 0
+                        const numeric = Number(slot)
+                        return Number.isFinite(numeric) ? numeric : Number.MAX_SAFE_INTEGER
+                    }
+                    return rank(a[0]) - rank(b[0])
+                })
+                .map(([, entry]) => entry)
+
+            return { rowNumber: index + 2, values: normalizedRow, contributions }
         })
 
         const summary = {
@@ -908,6 +982,9 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
             errorDetails: [],
             assigned: 0,
             unassigned: 0,
+            contributionsAdded: 0,
+            contributionsSkipped: 0,
+            contributionErrors: 0,
         }
 
         const insertStmt = db.prepare(`
@@ -953,8 +1030,19 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
                 assigned_date = CURRENT_TIMESTAMP
         `)
 
+        const findContributionStmt = db.prepare(`
+            SELECT id FROM giving_history
+            WHERE donor_id = ? AND year = ? AND candidate = ? AND amount = ?
+            LIMIT 1
+        `)
+
+        const insertContributionStmt = db.prepare(`
+            INSERT INTO giving_history (donor_id, year, candidate, amount)
+            VALUES (?, ?, ?, ?)
+        `)
+
         const applyRows = db.transaction((entries) => {
-            entries.forEach(({ rowNumber, values }) => {
+            entries.forEach(({ rowNumber, values, contributions }) => {
                 const transformed = transformDonorRow(values, fallbackClientId, clientLookup)
                 if (!transformed || transformed.error) {
                     summary.skipped += 1
@@ -963,6 +1051,11 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
                 }
 
                 const { donor, donorId, clientId } = transformed
+                const contributionResult = transformContributionRows(contributions)
+                contributionResult.errors.forEach((error) => {
+                    summary.contributionErrors += 1
+                    summary.errorDetails.push(`Row ${rowNumber}: ${error}`)
+                })
                 let finalDonorId = donorId
 
                 try {
@@ -989,6 +1082,30 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
                     } else {
                         summary.unassigned += 1
                     }
+
+                    const seenContributions = new Set()
+                    contributionResult.entries.forEach((entry) => {
+                        const key = `${entry.year}|${entry.candidate.toLowerCase()}|${entry.amount}`
+                        if (seenContributions.has(key)) {
+                            summary.contributionsSkipped += 1
+                            return
+                        }
+                        seenContributions.add(key)
+
+                        const existingContribution = findContributionStmt.get(
+                            finalDonorId,
+                            entry.year,
+                            entry.candidate,
+                            entry.amount
+                        )
+                        if (existingContribution) {
+                            summary.contributionsSkipped += 1
+                            return
+                        }
+
+                        insertContributionStmt.run(finalDonorId, entry.year, entry.candidate, entry.amount)
+                        summary.contributionsAdded += 1
+                    })
                 } catch (error) {
                     summary.skipped += 1
                     summary.errorDetails.push(`Row ${rowNumber}: ${error.message}`)
@@ -1000,18 +1117,21 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
 
         res.json({
             success: true,
-            summary: {
-                totalRows: summary.totalRows,
-                inserted: summary.inserted,
-                updated: summary.updated,
-                skipped: summary.skipped,
-                assigned: summary.assigned,
-                unassigned: summary.unassigned,
-                ignoredColumns: summary.ignoredColumns,
-                errorCount: summary.errorDetails.length,
-                errors: summary.errorDetails.slice(0, 20),
-            },
-        })
+                summary: {
+                    totalRows: summary.totalRows,
+                    inserted: summary.inserted,
+                    updated: summary.updated,
+                    skipped: summary.skipped,
+                    assigned: summary.assigned,
+                    unassigned: summary.unassigned,
+                    contributionsAdded: summary.contributionsAdded,
+                    contributionsSkipped: summary.contributionsSkipped,
+                    contributionErrors: summary.contributionErrors,
+                    ignoredColumns: summary.ignoredColumns,
+                    errorCount: summary.errorDetails.length,
+                    errors: summary.errorDetails.slice(0, 20),
+                },
+            })
     } catch (error) {
         res.status(500).json({ error: error.message })
     }
