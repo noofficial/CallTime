@@ -22,7 +22,9 @@ bootstrapDb.exec(`
     CREATE TABLE donors (
         id INTEGER PRIMARY KEY,
         client_id INTEGER,
-        name TEXT
+        name TEXT,
+        exclusive_donor INTEGER DEFAULT 0,
+        exclusive_client_id INTEGER
     );
     INSERT INTO donors (id, client_id, name) VALUES
         (101, 1, 'Assigned Donor'),

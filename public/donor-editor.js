@@ -2,6 +2,8 @@ const state = {
   history: [],
   assignedClients: new Set(),
   clients: [],
+  exclusiveDonor: false,
+  exclusiveClientId: "",
 };
 
 const elements = {
@@ -9,6 +11,8 @@ const elements = {
   status: document.getElementById("editor-status"),
   assignments: document.getElementById("editor-client-assignments"),
   selectAll: document.getElementById("select-all-clients"),
+  exclusiveToggle: document.getElementById("editor-exclusive-toggle"),
+  exclusiveClient: document.getElementById("editor-exclusive-client"),
   historyList: document.getElementById("history-list"),
   historyYear: document.getElementById("history-year"),
   historyCandidate: document.getElementById("history-candidate"),
@@ -36,6 +40,7 @@ export function configureDonorEditor(options = {}) {
 export function resetDonorEditorForm({ preserveStatus = false } = {}) {
   resetEditorState();
   renderAssignments();
+  renderExclusiveControls();
   renderHistory();
   if (!preserveStatus) {
     setStatus("");
@@ -61,12 +66,23 @@ function bindEvents() {
   elements.addHistory?.addEventListener("click", handleAddHistory);
   elements.historyList?.addEventListener("click", handleHistoryClick);
   elements.selectAll?.addEventListener("click", handleSelectAllClients);
+  elements.exclusiveToggle?.addEventListener("change", handleExclusiveToggle);
+  elements.exclusiveClient?.addEventListener("change", handleExclusiveClientChange);
 }
 
 function resetEditorState() {
   state.history = [];
   state.assignedClients = new Set();
+  state.exclusiveDonor = false;
+  state.exclusiveClientId = "";
   elements.form?.reset();
+  if (elements.exclusiveToggle) {
+    elements.exclusiveToggle.value = "no";
+  }
+  if (elements.exclusiveClient) {
+    elements.exclusiveClient.value = "";
+    elements.exclusiveClient.setAttribute("disabled", "true");
+  }
   if (elements.historyYear) elements.historyYear.value = "";
   if (elements.historyCandidate) elements.historyCandidate.value = "";
   if (elements.historyOffice) elements.historyOffice.value = "";
@@ -86,6 +102,20 @@ async function loadData() {
     state.clients = clients;
     const validClientIds = new Set(clients.map((client) => client.id));
     state.assignedClients = new Set([...previousSelection].filter((id) => validClientIds.has(id)));
+    if (state.exclusiveDonor) {
+      if (state.exclusiveClientId && !validClientIds.has(state.exclusiveClientId)) {
+        state.exclusiveClientId = clients.length ? clients[0].id : "";
+      }
+      if (!state.exclusiveClientId && clients.length) {
+        state.exclusiveClientId = clients[0].id;
+      }
+      if (state.exclusiveClientId) {
+        state.assignedClients = new Set([state.exclusiveClientId]);
+      }
+    } else if (state.exclusiveClientId && !validClientIds.has(state.exclusiveClientId)) {
+      state.exclusiveClientId = "";
+    }
+    renderExclusiveControls();
     renderAssignments();
   } catch (error) {
     console.error("Failed to load clients", error);
@@ -96,6 +126,13 @@ async function handleSubmit(event) {
   event.preventDefault();
   if (!elements.form || !elements.form.reportValidity()) {
     return;
+  }
+  if (state.exclusiveDonor) {
+    if (!state.exclusiveClientId) {
+      setStatus("Select the campaign this exclusive donor belongs to.", "error");
+      return;
+    }
+    state.assignedClients = new Set([state.exclusiveClientId]);
   }
   const selectedClients = Array.from(state.assignedClients);
   if (!selectedClients.length) {
@@ -124,6 +161,8 @@ async function handleSubmit(event) {
     biography: formData.get("biography")?.toString().trim() || "",
     history: [...state.history],
     assignedClientIds: selectedClients,
+    exclusiveDonor: state.exclusiveDonor,
+    exclusiveClientId: state.exclusiveDonor ? state.exclusiveClientId : null,
     createdBy: "donor-editor",
   };
 
@@ -183,12 +222,51 @@ function handleHistoryClick(event) {
 }
 
 function handleSelectAllClients() {
+  if (state.exclusiveDonor && state.exclusiveClientId) {
+    return;
+  }
   if (!state.clients.length) return;
   const allSelected = state.clients.every((client) => state.assignedClients.has(client.id));
   if (allSelected) {
     state.assignedClients.clear();
   } else {
     state.clients.forEach((client) => state.assignedClients.add(client.id));
+  }
+  renderAssignments();
+}
+
+function handleExclusiveToggle(event) {
+  const shouldLock = event.target.value === "yes";
+  if (shouldLock && !state.clients.length) {
+    event.target.value = "no";
+    state.exclusiveDonor = false;
+    setStatus("Add a campaign before locking this donor to one candidate.", "error");
+    return;
+  }
+  state.exclusiveDonor = shouldLock;
+  if (state.exclusiveDonor) {
+    const assigned = state.assignedClients.size ? [...state.assignedClients][0] : "";
+    const validAssigned = assigned && state.clients.some((client) => client.id === assigned);
+    if (validAssigned) {
+      state.exclusiveClientId = assigned;
+    } else {
+      state.exclusiveClientId = state.clients.length ? state.clients[0].id : "";
+    }
+    if (state.exclusiveClientId) {
+      state.assignedClients = new Set([state.exclusiveClientId]);
+    }
+  } else {
+    state.exclusiveClientId = state.exclusiveClientId || "";
+  }
+  renderExclusiveControls();
+  renderAssignments();
+}
+
+function handleExclusiveClientChange(event) {
+  const value = event.target.value || "";
+  state.exclusiveClientId = value;
+  if (value) {
+    state.assignedClients = new Set([value]);
   }
   renderAssignments();
 }
@@ -208,27 +286,90 @@ function renderAssignments() {
     }
     return;
   }
-  elements.selectAll?.removeAttribute("disabled");
+  const isExclusive = state.exclusiveDonor && !!state.exclusiveClientId;
+  if (isExclusive) {
+    elements.selectAll?.setAttribute("disabled", "true");
+  } else {
+    elements.selectAll?.removeAttribute("disabled");
+  }
   state.clients.forEach((client) => {
     const label = document.createElement("label");
     label.className = "assignment-grid__item";
     const input = document.createElement("input");
     input.type = "checkbox";
     input.value = client.id;
-    input.checked = state.assignedClients.has(client.id);
-    input.addEventListener("change", (event) => {
-      if (event.target.checked) {
-        state.assignedClients.add(client.id);
-      } else {
-        state.assignedClients.delete(client.id);
-      }
-    });
+    const isSelected = state.assignedClients.has(client.id);
+    input.checked = isSelected;
+    if (isExclusive) {
+      const isExclusiveClient = client.id === state.exclusiveClientId;
+      input.disabled = !isExclusiveClient;
+      input.checked = isExclusiveClient;
+      input.addEventListener("change", (event) => {
+        if (!isExclusiveClient) {
+          event.preventDefault();
+          event.target.checked = false;
+          return;
+        }
+        if (!event.target.checked) {
+          event.preventDefault();
+          event.target.checked = true;
+        }
+      });
+    } else {
+      input.addEventListener("change", (event) => {
+        if (event.target.checked) {
+          state.assignedClients.add(client.id);
+        } else {
+          state.assignedClients.delete(client.id);
+        }
+      });
+    }
     const name = document.createElement("span");
     name.textContent = client.label || "Unnamed candidate";
     label.append(input, name);
     container.append(label);
   });
   updateSelectAllLabel();
+}
+
+function renderExclusiveControls() {
+  if (elements.exclusiveToggle) {
+    elements.exclusiveToggle.value = state.exclusiveDonor ? "yes" : "no";
+  }
+  const select = elements.exclusiveClient;
+  if (!select) return;
+  select.innerHTML = "";
+  const hasClients = state.clients.length > 0;
+  if (hasClients) {
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Select a campaign";
+    placeholder.disabled = true;
+    placeholder.hidden = true;
+    select.append(placeholder);
+    state.clients.forEach((client) => {
+      const option = document.createElement("option");
+      option.value = client.id;
+      option.textContent = client.label || client.candidate || "Unnamed candidate";
+      select.append(option);
+    });
+    if (state.exclusiveClientId && state.clients.some((client) => client.id === state.exclusiveClientId)) {
+      select.value = state.exclusiveClientId;
+    } else {
+      select.value = "";
+    }
+  } else {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No campaigns available";
+    select.append(option);
+    select.value = "";
+  }
+  if (state.exclusiveDonor && hasClients) {
+    select.removeAttribute("disabled");
+  } else {
+    select.setAttribute("disabled", "true");
+  }
 }
 
 function updateSelectAllLabel() {
