@@ -3179,6 +3179,28 @@ app.post('/api/donors', authenticateManager, (req, res) => {
         return res.status(400).json({ error: 'Assigned clients are invalid' })
     }
 
+    const exclusiveDonorInput = payload.exclusiveDonor
+    const exclusiveClientInput =
+        payload.exclusiveClientId ?? payload.exclusiveClient ?? payload.exclusive_client_id
+
+    const exclusiveDonor = parseBooleanFlag(exclusiveDonorInput, { defaultValue: false })
+    let exclusiveClientId = null
+
+    if (exclusiveDonor) {
+        let resolvedExclusive = null
+        if (exclusiveClientInput !== undefined && exclusiveClientInput !== null && exclusiveClientInput !== '') {
+            resolvedExclusive = normalizeClientIdForStorage(exclusiveClientInput)
+        }
+        if (!resolvedExclusive && numericClientIds.length) {
+            resolvedExclusive = normalizeClientIdForStorage(numericClientIds[0])
+        }
+        if (!resolvedExclusive) {
+            return res.status(400).json({ error: 'Exclusive donor assignment is invalid' })
+        }
+        exclusiveClientId = resolvedExclusive
+        numericClientIds = [exclusiveClientId]
+    }
+
     const ownerClientId = normalizeClientIdForStorage(numericClientIds[0])
     if (!ownerClientId) {
         return res.status(400).json({ error: 'Assigned clients are invalid' })
@@ -3211,7 +3233,7 @@ app.post('/api/donors', authenticateManager, (req, res) => {
         const result = stmt.run(
             ownerClientId,
             exclusiveDonor ? 1 : 0,
-            exclusiveClientId,
+            exclusiveDonor ? exclusiveClientId : null,
             name,
             payload.firstName || null,
             payload.lastName || null,
