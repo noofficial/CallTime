@@ -190,6 +190,14 @@ const cleanString = (value) => {
     return converted === '' ? null : converted
 }
 
+const normalizeOptionalField = (value) => {
+    if (value === undefined || value === null) return null
+    if (typeof value === 'string') {
+        return cleanString(value)
+    }
+    return value
+}
+
 const hasValue = (value) => {
     if (value === undefined || value === null) return false
     if (typeof value === 'string') {
@@ -2575,6 +2583,19 @@ app.post('/api/client/:clientId/call-outcome', authenticateClient, (req, res) =>
         return res.status(500).json({ error: error.message })
     }
 
+    const normalizedStatus = cleanString(status)
+    if (!normalizedStatus) {
+        return res.status(400).json({ error: 'status required' })
+    }
+
+    const normalizedOutcomeNotes = normalizeOptionalField(outcomeNotes)
+    const normalizedFollowUpDate = normalizeOptionalField(followUpDate)
+    const normalizedPledgeAmount = normalizeOptionalField(pledgeAmount)
+    const normalizedContributionAmount = normalizeOptionalField(contributionAmount)
+    const normalizedNextAction = normalizeOptionalField(nextAction)
+    const normalizedCallDuration = normalizeOptionalField(callDuration)
+    const normalizedCallQuality = normalizeOptionalField(callQuality)
+
     try {
         const stmt = db.prepare(`
             INSERT INTO call_outcomes (
@@ -2584,8 +2605,16 @@ app.post('/api/client/:clientId/call-outcome', authenticateClient, (req, res) =>
         `)
 
         const result = stmt.run(
-            clientId, donorId, status, outcomeNotes, followUpDate,
-            pledgeAmount, contributionAmount, nextAction, callDuration, callQuality
+            clientId,
+            donorId,
+            normalizedStatus,
+            normalizedOutcomeNotes,
+            normalizedFollowUpDate,
+            normalizedPledgeAmount,
+            normalizedContributionAmount,
+            normalizedNextAction,
+            normalizedCallDuration,
+            normalizedCallQuality
         )
 
         res.json({ success: true, outcomeId: result.lastInsertRowid })
@@ -2612,6 +2641,12 @@ app.post('/api/client/:clientId/donor/:donorId/research', authenticateClient, (r
         return res.status(500).json({ error: error.message })
     }
 
+    const normalizedCategory = cleanString(category)
+    if (!normalizedCategory) {
+        return res.status(400).json({ error: 'category required' })
+    }
+    const normalizedContent = normalizeOptionalField(content)
+
     try {
         const stmt = db.prepare(`
             INSERT OR REPLACE INTO client_donor_research
@@ -2619,7 +2654,7 @@ app.post('/api/client/:clientId/donor/:donorId/research', authenticateClient, (r
             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
         `)
 
-        const result = stmt.run(clientId, donorId, category, content)
+        const result = stmt.run(clientId, donorId, normalizedCategory, normalizedContent)
         res.json({ success: true, researchId: result.lastInsertRowid })
     } catch (error) {
         res.status(500).json({ error: error.message })
@@ -2644,13 +2679,26 @@ app.post('/api/client/:clientId/donor/:donorId/notes', authenticateClient, (req,
         return res.status(500).json({ error: error.message })
     }
 
+    const normalizedNoteType = cleanString(noteType)
+    if (!normalizedNoteType) {
+        return res.status(400).json({ error: 'noteType required' })
+    }
+    const normalizedNoteContent = normalizeOptionalField(noteContent)
+    const normalizedIsPrivate = isPrivate ? 1 : 0
+
     try {
         const stmt = db.prepare(`
             INSERT INTO client_donor_notes (client_id, donor_id, note_type, note_content, is_private)
             VALUES (?, ?, ?, ?, ?)
         `)
 
-        const result = stmt.run(clientId, donorId, noteType, noteContent, isPrivate)
+        const result = stmt.run(
+            clientId,
+            donorId,
+            normalizedNoteType,
+            normalizedNoteContent,
+            normalizedIsPrivate
+        )
         res.json({ success: true, noteId: result.lastInsertRowid })
     } catch (error) {
         res.status(500).json({ error: error.message })
