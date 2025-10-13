@@ -1986,14 +1986,22 @@ app.get('/api/auth/clients', (req, res) => {
 app.get('/api/manager/overview', authenticateManager, (req, res) => {
     try {
         const clients = db.prepare(`
-            SELECT c.*, 
-                   COUNT(DISTINCT da.donor_id) as assigned_donors,
-                   COUNT(DISTINCT co.id) as total_calls,
-                   COALESCE(SUM(co.pledge_amount), 0) as total_pledged,
-                   COALESCE(SUM(co.contribution_amount), 0) as total_raised
+            WITH call_totals AS (
+                SELECT client_id,
+                       COUNT(*) AS total_calls,
+                       COALESCE(SUM(pledge_amount), 0) AS total_pledged,
+                       COALESCE(SUM(contribution_amount), 0) AS total_raised
+                FROM call_outcomes
+                GROUP BY client_id
+            )
+            SELECT c.*,
+                   COUNT(DISTINCT da.donor_id) AS assigned_donors,
+                   COALESCE(MAX(ct.total_calls), 0) AS total_calls,
+                   COALESCE(MAX(ct.total_pledged), 0) AS total_pledged,
+                   COALESCE(MAX(ct.total_raised), 0) AS total_raised
             FROM clients c
+            LEFT JOIN call_totals ct ON c.id = ct.client_id
             LEFT JOIN donor_assignments da ON c.id = da.client_id AND da.is_active = 1
-            LEFT JOIN call_outcomes co ON c.id = co.client_id
             GROUP BY c.id
             ORDER BY c.name
         `).all()
