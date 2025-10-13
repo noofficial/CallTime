@@ -93,7 +93,8 @@ function bootstrap() {
   }
 }
 
-async function performLogout(message = "You have been signed out.") {
+async function performLogout(message = "You have been signed out.", options = {}) {
+  const { redirect = true } = options;
   const token = getManagerToken();
   if (token) {
     try {
@@ -122,10 +123,9 @@ async function performLogout(message = "You have been signed out.") {
   renderClients();
   renderDonors();
   renderAssignmentLists();
-  if (typeof window !== "undefined") {
+  showLoginScreen(message);
+  if (redirect && typeof window !== "undefined") {
     window.location.assign("index.html");
-  } else {
-    showLoginScreen(message);
   }
 }
 
@@ -1366,7 +1366,7 @@ function formatFileSize(bytes) {
 
 function reportError(error) {
   if (error instanceof UnauthorizedError) {
-    performLogout("Sign in to access the manager workspace.");
+    performLogout("Sign in to access the manager workspace.", { redirect: false });
     return;
   }
   console.error(error);
