@@ -1505,6 +1505,10 @@ body.modal-open {
   min-height: 240px;
 }
 
+.database-detail__empty.hidden {
+  display: none;
+}
+
 .donor-profile {
   display: flex;
   flex-direction: column;
