@@ -81,7 +81,9 @@ const passwordResetElements = {
   description: document.getElementById("client-password-reset-description"),
 };
 
-bootstrap();
+if (typeof window === "undefined" || !window.__CALLTIME_TESTING__) {
+  bootstrap();
+}
 
 function bootstrap() {
   bindAuthEvents();
@@ -453,7 +455,11 @@ async function performLogout(message = "You have been signed out.") {
   hidePasswordResetScreen();
   populateClientSelector();
   if (elements.queue) {
-    elements.queue.innerHTML = `<p class="muted">Sign in to access your call queue.</p>`;
+    elements.queue.textContent = "";
+    const message = document.createElement("p");
+    message.className = "muted";
+    message.textContent = "Sign in to access your call queue.";
+    elements.queue.append(message);
   }
   hideDonorDetails();
   if (elements.stats) {
@@ -569,18 +575,26 @@ function applyFilter() {
 function renderQueue() {
   const container = elements.queue;
   if (!container) return;
-  container.innerHTML = "";
+  container.textContent = "";
   if (!state.filteredDonors.length) {
-    container.innerHTML = `<p class="muted">No donors in this view. Adjust your filters or assignments.</p>`;
+    const message = document.createElement("p");
+    message.className = "muted";
+    message.textContent = "No donors in this view. Adjust your filters or assignments.";
+    container.append(message);
     return;
   }
 
   state.filteredDonors.forEach((donor) => {
     const card = document.createElement("div");
+    card.className = "queue-item";
     const status = donor.last_call_status || "Not Contacted";
-    const isCompleted = !["Not Contacted", "No Answer - Left Message", "No Answer - No Message"].includes(status);
-    card.className = `queue-item ${isCompleted ? "completed" : ""}`;
-    card.setAttribute("data-donor-id", donor.id);
+    if (!["Not Contacted", "No Answer - Left Message", "No Answer - No Message"].includes(status)) {
+      card.classList.add("completed");
+    }
+    if (donor.id !== undefined && donor.id !== null) {
+      card.setAttribute("data-donor-id", String(donor.id));
+    }
+
     const employer = donor.company || donor.employer || "";
     const jobTitle = donor.job_title || donor.title || "";
     const location = formatDonorLocation(donor);
@@ -595,19 +609,37 @@ function renderQueue() {
       professional = "Unknown employer";
     }
 
-    card.innerHTML = `
-      <div class="queue-donor-info">
-        <div class="queue-donor-name">${donor.name || `${donor.first_name || ""} ${donor.last_name || ""}`.trim() || "Unnamed donor"}</div>
-        <div class="queue-donor-details">
-          ${professional}${location ? ` • ${location}` : ""} • ${donor.phone || "No phone"} • Capacity: $${formatCurrency(
-            donor.capacity || donor.suggested_ask || 0,
-          )}
-        </div>
-      </div>
-      <div class="queue-status">
-        <span class="status ${getStatusClass(status)}">${status}</span>
-      </div>
-    `;
+    const info = document.createElement("div");
+    info.className = "queue-donor-info";
+
+    const nameEl = document.createElement("div");
+    nameEl.className = "queue-donor-name";
+    const fullName =
+      donor.name || `${donor.first_name || ""} ${donor.last_name || ""}`.trim() || "Unnamed donor";
+    nameEl.textContent = fullName;
+    info.append(nameEl);
+
+    const details = document.createElement("div");
+    details.className = "queue-donor-details";
+    const parts = [professional];
+    if (location) {
+      parts.push(location);
+    }
+    parts.push(donor.phone || "No phone");
+    const capacityValue = donor.capacity || donor.suggested_ask || 0;
+    parts.push(`Capacity: $${formatCurrency(capacityValue)}`);
+    details.textContent = parts.filter(Boolean).join(" • ");
+    info.append(details);
+
+    const statusWrapper = document.createElement("div");
+    statusWrapper.className = "queue-status";
+
+    const statusEl = document.createElement("span");
+    statusEl.className = `status ${getStatusClass(status)}`;
+    statusEl.textContent = status;
+    statusWrapper.append(statusEl);
+
+    card.append(info, statusWrapper);
     container.append(card);
   });
 }
@@ -651,75 +683,144 @@ function hideDonorDetails() {
 function renderDonorDetails(details) {
   if (!details) return;
   const name = details.name || `${details.first_name || ""} ${details.last_name || ""}`.trim() || "Unnamed donor";
-  elements.donorName.textContent = name;
-  elements.donorInfo.innerHTML = `
-    <div class="donor-info-grid">
-      ${renderInfoItem("Phone", details.phone || "No phone on file")}
-      ${renderInfoItem("Email", details.email || "No email on file")}
-      ${renderInfoItem("Employer", details.company || details.employer || "Unknown")}
-      ${renderInfoItem("Title", details.job_title || details.title || "Unknown")}
-      ${renderInfoItem("Street address", formatStreetAddress(details) || "Unknown")}
-      ${renderInfoItem("City", normalizeText(details.city) || "Unknown")}
-      ${renderInfoItem("State / Region", normalizeText(details.state) || "Unknown")}
-      ${renderInfoItem(
+  if (elements.donorName) {
+    elements.donorName.textContent = name;
+  }
+  if (elements.donorInfo) {
+    elements.donorInfo.textContent = "";
+
+    const grid = document.createElement("div");
+    grid.className = "donor-info-grid";
+    const streetLines = formatStreetAddress(details);
+    grid.append(
+      renderInfoItem("Phone", details.phone || "No phone on file"),
+      renderInfoItem("Email", details.email || "No email on file"),
+      renderInfoItem("Employer", details.company || details.employer || "Unknown"),
+      renderInfoItem("Title", details.job_title || details.title || "Unknown"),
+      renderInfoItem("Street address", streetLines.length ? streetLines : "Unknown"),
+      renderInfoItem("City", normalizeText(details.city) || "Unknown"),
+      renderInfoItem("State / Region", normalizeText(details.state) || "Unknown"),
+      renderInfoItem(
         "Postal code",
         normalizeText(details.postal_code || details.postalCode) || "Unknown",
-      )}
-      ${renderInfoItem("Industry", details.industry || details.occupation || "Unknown")}
-      ${renderInfoItem("Giving capacity", `$${formatCurrency(details.capacity || details.suggested_ask || 0)}`)}
-      ${renderInfoItem("Last gift", details.last_gift || details.last_gift_note || "N/A")}
-    </div>
-    <div class="donor-tags">${renderTags(details.tags)}</div>
-    ${renderResearch(details.research)}
-    ${renderNotes(details.notes)}
-  `;
+      ),
+      renderInfoItem("Industry", details.industry || details.occupation || "Unknown"),
+      renderInfoItem("Giving capacity", `$${formatCurrency(details.capacity || details.suggested_ask || 0)}`),
+      renderInfoItem("Last gift", details.last_gift || details.last_gift_note || "N/A"),
+    );
+    elements.donorInfo.append(grid);
+
+    const tagsContainer = document.createElement("div");
+    tagsContainer.className = "donor-tags";
+    const tags = renderTags(details.tags);
+    if (tags) {
+      tagsContainer.append(tags);
+    }
+    elements.donorInfo.append(tagsContainer);
+
+    const researchSection = renderResearch(details.research);
+    if (researchSection) {
+      elements.donorInfo.append(researchSection);
+    }
+
+    const notesSection = renderNotes(details.notes);
+    if (notesSection) {
+      elements.donorInfo.append(notesSection);
+    }
+  }
 
   const latestStatus = (details.callHistory && details.callHistory[0]?.status) || "Not Contacted";
-  elements.callStatus.value = CALL_STATUSES.includes(latestStatus) ? latestStatus : "";
-  elements.askAmount.value = "";
-  elements.committedAmount.value = "";
-  elements.callNotes.value = "";
-  elements.followupDate.value = "";
-  elements.outcomeStatus.textContent = "";
+  if (elements.callStatus) {
+    elements.callStatus.value = CALL_STATUSES.includes(latestStatus) ? latestStatus : "";
+  }
+  if (elements.askAmount) {
+    elements.askAmount.value = "";
+  }
+  if (elements.committedAmount) {
+    elements.committedAmount.value = "";
+  }
+  if (elements.callNotes) {
+    elements.callNotes.value = "";
+  }
+  if (elements.followupDate) {
+    elements.followupDate.value = "";
+  }
+  if (elements.outcomeStatus) {
+    elements.outcomeStatus.textContent = "";
+  }
   renderCallHistory(details.callHistory || []);
 }
 
 function renderResearch(research = []) {
-  if (!Array.isArray(research) || !research.length) return "";
-  const items = research
-    .map(
-      (entry) => `
-        <article class="info-block">
-          <h4>${entry.research_category}</h4>
-          <p>${entry.research_content || "No research notes"}</p>
-          <p class="muted">Updated ${formatDate(entry.updated_at)}</p>
-        </article>
-      `,
-    )
-    .join("");
-  return `<section class="info-group"><h3>Research</h3>${items}</section>`;
+  if (!Array.isArray(research) || !research.length) return null;
+  const section = document.createElement("section");
+  section.className = "info-group";
+  const heading = document.createElement("h3");
+  heading.textContent = "Research";
+  section.append(heading);
+
+  research.forEach((entry) => {
+    const article = document.createElement("article");
+    article.className = "info-block";
+
+    const title = document.createElement("h4");
+    title.textContent = entry.research_category || "Research";
+    article.append(title);
+
+    const content = document.createElement("p");
+    content.textContent = entry.research_content || "No research notes";
+    article.append(content);
+
+    const meta = document.createElement("p");
+    meta.className = "muted";
+    meta.textContent = `Updated ${formatDate(entry.updated_at)}`;
+    article.append(meta);
+
+    section.append(article);
+  });
+
+  return section;
 }
 
 function renderNotes(notes = []) {
-  if (!Array.isArray(notes) || !notes.length) return "";
-  const items = notes
-    .map(
-      (entry) => `
-        <article class="info-block">
-          <h4>${entry.note_type || "Note"}</h4>
-          <p>${entry.note_content}</p>
-          <p class="muted">Saved ${formatDate(entry.created_at)}</p>
-        </article>
-      `,
-    )
-    .join("");
-  return `<section class="info-group"><h3>Private notes</h3>${items}</section>`;
+  if (!Array.isArray(notes) || !notes.length) return null;
+  const section = document.createElement("section");
+  section.className = "info-group";
+  const heading = document.createElement("h3");
+  heading.textContent = "Private notes";
+  section.append(heading);
+
+  notes.forEach((entry) => {
+    const article = document.createElement("article");
+    article.className = "info-block";
+
+    const title = document.createElement("h4");
+    title.textContent = entry.note_type || "Note";
+    article.append(title);
+
+    const content = document.createElement("p");
+    content.textContent = entry.note_content || "";
+    article.append(content);
+
+    const meta = document.createElement("p");
+    meta.className = "muted";
+    meta.textContent = `Saved ${formatDate(entry.created_at)}`;
+    article.append(meta);
+
+    section.append(article);
+  });
+
+  return section;
 }
 
 function renderCallHistory(history = []) {
-  elements.callHistory.innerHTML = "";
+  if (!elements.callHistory) return;
+  elements.callHistory.textContent = "";
   if (!history.length) {
-    elements.callHistory.innerHTML = `<p class="muted">No call history recorded yet.</p>`;
+    const message = document.createElement("p");
+    message.className = "muted";
+    message.textContent = "No call history recorded yet.";
+    elements.callHistory.append(message);
     return;
   }
   const list = document.createElement("div");
@@ -727,18 +828,39 @@ function renderCallHistory(history = []) {
   history.forEach((entry) => {
     const item = document.createElement("article");
     item.className = "call-history__item";
-    item.innerHTML = `
-      <header>
-        <span class="status ${getStatusClass(entry.status)}">${entry.status}</span>
-        <span class="muted">${formatDate(entry.call_date)}</span>
-      </header>
-      <p>${entry.outcome_notes || "No notes recorded."}</p>
-      <footer>
-        ${entry.pledge_amount ? `<span>Pledged: $${formatCurrency(entry.pledge_amount)}</span>` : ""}
-        ${entry.contribution_amount ? `<span>Raised: $${formatCurrency(entry.contribution_amount)}</span>` : ""}
-        ${entry.follow_up_date ? `<span>Follow-up: ${formatDate(entry.follow_up_date)}</span>` : ""}
-      </footer>
-    `;
+
+    const header = document.createElement("header");
+    const status = document.createElement("span");
+    status.className = `status ${getStatusClass(entry.status)}`;
+    status.textContent = entry.status || "Unknown";
+    header.append(status);
+
+    const date = document.createElement("span");
+    date.className = "muted";
+    date.textContent = formatDate(entry.call_date);
+    header.append(date);
+
+    const body = document.createElement("p");
+    body.textContent = entry.outcome_notes || "No notes recorded.";
+
+    const footer = document.createElement("footer");
+    if (entry.pledge_amount) {
+      const pledge = document.createElement("span");
+      pledge.textContent = `Pledged: $${formatCurrency(entry.pledge_amount)}`;
+      footer.append(pledge);
+    }
+    if (entry.contribution_amount) {
+      const contribution = document.createElement("span");
+      contribution.textContent = `Raised: $${formatCurrency(entry.contribution_amount)}`;
+      footer.append(contribution);
+    }
+    if (entry.follow_up_date) {
+      const followUp = document.createElement("span");
+      followUp.textContent = `Follow-up: ${formatDate(entry.follow_up_date)}`;
+      footer.append(followUp);
+    }
+
+    item.append(header, body, footer);
     list.append(item);
   });
   elements.callHistory.append(list);
@@ -762,39 +884,74 @@ function formatDonorLocation(donor) {
 }
 
 function formatStreetAddress(donor) {
-  if (!donor) return "";
+  if (!donor) return [];
   const street = normalizeText(donor.street_address || donor.streetAddress);
   const line2 = normalizeText(donor.address_line2 || donor.addressLine2);
-  const lines = [street, line2].filter(Boolean);
-  if (!lines.length) return "";
-  return lines.join("<br />");
+  return [street, line2].filter(Boolean);
 }
 
 function renderInfoItem(label, value) {
-  return `
-    <div class="info-item">
-      <div class="info-label">${label}</div>
-      <div class="info-value">${value}</div>
-    </div>
-  `;
+  const item = document.createElement("div");
+  item.className = "info-item";
+
+  const labelEl = document.createElement("div");
+  labelEl.className = "info-label";
+  labelEl.textContent = label;
+  item.append(labelEl);
+
+  const valueEl = document.createElement("div");
+  valueEl.className = "info-value";
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => {
+      if (index > 0) {
+        valueEl.append(document.createElement("br"));
+      }
+      valueEl.append(document.createTextNode(String(entry)));
+    });
+  } else if (value instanceof Node) {
+    valueEl.append(value);
+  } else {
+    valueEl.textContent = value;
+  }
+  item.append(valueEl);
+  return item;
 }
 
 function renderTags(raw) {
-  if (!raw) return "";
-  if (Array.isArray(raw)) {
-    return raw.map((tag) => `<span class="tag">${tag}</span>`).join(" ");
-  }
-  return String(raw)
-    .split(",")
-    .map((tag) => tag.trim())
-    .filter(Boolean)
-    .map((tag) => `<span class="tag">${tag}</span>`)
-    .join(" ");
+  if (!raw) return null;
+  const tags = Array.isArray(raw)
+    ? raw
+    : String(raw)
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean);
+  if (!tags.length) return null;
+  const fragment = document.createDocumentFragment();
+  tags.forEach((tag) => {
+    const chip = document.createElement("span");
+    chip.className = "tag";
+    chip.textContent = tag;
+    fragment.append(chip);
+  });
+  return fragment;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function populateStatusOptions() {
   if (!elements.callStatus) return;
-  elements.callStatus.innerHTML = `<option value="">Select outcome…</option>`;
+  elements.callStatus.textContent = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select outcome…";
+  elements.callStatus.append(placeholder);
   CALL_STATUSES.forEach((status) => {
     const option = document.createElement("option");
     option.value = status;
@@ -923,3 +1080,18 @@ function reportError(error) {
   console.error(error);
   window.alert(error.message || "Something went wrong");
 }
+
+export const __TESTING__ = {
+  state,
+  elements,
+  renderQueue,
+  renderDonorDetails,
+  renderResearch,
+  renderNotes,
+  renderCallHistory,
+  renderInfoItem,
+  renderTags,
+  formatDonorLocation,
+  formatStreetAddress,
+  escapeHtml,
+};
