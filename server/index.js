@@ -3401,21 +3401,31 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
             )
 
             if (exclusiveDonor && resolvedExclusiveClientId) {
+                const assignmentActor = payload.updatedBy || payload.createdBy || 'manager'
+
                 db.prepare(
                     'UPDATE donor_assignments SET is_active = 0 WHERE donor_id = ? AND client_id != ?'
                 ).run(donorId, resolvedExclusiveClientId)
 
-                db.prepare(`
-                    INSERT INTO donor_assignments (client_id, donor_id, assigned_by, is_active)
-                    VALUES (?, ?, ?, 1)
-                    ON CONFLICT(client_id, donor_id) DO UPDATE SET
-                        is_active = 1,
-                        assigned_by = excluded.assigned_by
-                `).run(
-                    resolvedExclusiveClientId,
-                    donorId,
-                    payload.updatedBy || payload.createdBy || 'manager'
-                )
+                const existingAssignment = db
+                    .prepare(
+                        'SELECT id FROM donor_assignments WHERE client_id = ? AND donor_id = ? LIMIT 1'
+                    )
+                    .get(resolvedExclusiveClientId, donorId)
+
+                if (existingAssignment) {
+                    db.prepare(`
+                        UPDATE donor_assignments
+                        SET is_active = 1,
+                            assigned_by = ?
+                        WHERE id = ?
+                    `).run(assignmentActor, existingAssignment.id)
+                } else {
+                    db.prepare(`
+                        INSERT INTO donor_assignments (client_id, donor_id, assigned_by, is_active)
+                        VALUES (?, ?, ?, 1)
+                    `).run(resolvedExclusiveClientId, donorId, assignmentActor)
+                }
             }
         })
 
