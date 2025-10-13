@@ -1071,6 +1071,10 @@ const CLIENT_DONOR_NOTES_COLUMN_ORDER = [
     'updated_at',
 ]
 
+const quoteIdentifier = (identifier) => `"${String(identifier).replace(/"/g, '""')}"`
+
+const quoteLiteral = (value) => `'${String(value).replace(/'/g, "''")}'`
+
 const schemaEntryExists = (name, type = 'table') => {
     try {
         const stmt = db.prepare(
@@ -1109,6 +1113,168 @@ const deleteFromTableIfExists = (table, whereClause, params = []) => {
         }
 
         throw error
+    }
+}
+
+const replaceLegacyDonorReferencesInTable = (tableName) => {
+    let foreignKeysInitiallyEnabled = 0
+
+    try {
+        if (!schemaEntryExists(tableName, 'table')) {
+            return false
+        }
+
+        const foreignKeys = db
+            .prepare(`PRAGMA foreign_key_list(${quoteIdentifier(tableName)})`)
+            .all()
+        const referencesLegacy = foreignKeys.some((fk) => fk.table === 'donors_legacy')
+
+        if (!referencesLegacy) {
+            return false
+        }
+
+        const tableDefinition = db
+            .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
+            .get(tableName)
+
+        if (!tableDefinition?.sql) {
+            console.warn(
+                `Unable to rebuild ${tableName} table because its schema definition is missing.`
+            )
+            return false
+        }
+
+        const columnInfo = db
+            .prepare(`PRAGMA table_info(${quoteIdentifier(tableName)})`)
+            .all()
+        const columns = columnInfo.map((column) => column.name)
+
+        const indexes = db
+            .prepare(
+                "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL"
+            )
+            .all(tableName)
+
+        const updatedTableSql = tableDefinition.sql.replace(/donors_legacy/gi, 'donors')
+
+        const createTableSql = updatedTableSql.replace(
+            /CREATE TABLE\s+(IF NOT EXISTS\s+)?("[^"]+"|'[^']+'|`[^`]+`|\[[^\]]+\]|\w+)/i,
+            (match, ifNotExistsSegment = '', nameSegment = '') => {
+                const prefix = ifNotExistsSegment ?? ''
+                const leadingChar = nameSegment?.[0] ?? ''
+
+                if (leadingChar === '"') {
+                    return `CREATE TABLE ${prefix}"${tableName}_new"`
+                }
+
+                if (leadingChar === "'") {
+                    return `CREATE TABLE ${prefix}'${tableName}_new'`
+                }
+
+                if (leadingChar === '`') {
+                    return `CREATE TABLE ${prefix}\`${tableName}_new\``
+                }
+
+                if (leadingChar === '[') {
+                    return `CREATE TABLE ${prefix}[${tableName}_new]`
+                }
+
+                return `CREATE TABLE ${prefix}${tableName}_new`
+            }
+        )
+
+        if (createTableSql === updatedTableSql) {
+            console.warn(
+                `Unable to prepare CREATE TABLE statement for ${tableName} when updating donor references.`
+            )
+            return false
+        }
+
+        foreignKeysInitiallyEnabled = disableForeignKeysForMigration()
+
+        db.exec(`DROP TABLE IF EXISTS ${quoteIdentifier(`${tableName}_new`)}`)
+        db.exec(createTableSql)
+
+        if (columns.length) {
+            const columnList = columns.map((name) => quoteIdentifier(name)).join(', ')
+            db.exec(
+                `INSERT INTO ${quoteIdentifier(`${tableName}_new`)} (${columnList}) SELECT ${columnList} FROM ${quoteIdentifier(tableName)}`
+            )
+        }
+
+        db.exec(`DROP TABLE ${quoteIdentifier(tableName)}`)
+        db.exec(
+            `ALTER TABLE ${quoteIdentifier(`${tableName}_new`)} RENAME TO ${quoteIdentifier(tableName)}`
+        )
+
+        for (const index of indexes) {
+            if (!index?.sql) {
+                continue
+            }
+
+            try {
+                db.exec(index.sql)
+            } catch (error) {
+                console.warn(`Failed to recreate index on ${tableName}:`, error.message)
+            }
+        }
+
+        if (tableDefinition.sql.toUpperCase().includes('AUTOINCREMENT')) {
+            const primaryKeyColumn = columnInfo.find((column) => column.pk)
+
+            if (primaryKeyColumn) {
+                try {
+                    db.exec(
+                        `UPDATE sqlite_sequence SET seq = COALESCE((SELECT MAX(${quoteIdentifier(
+                            primaryKeyColumn.name
+                        )}) FROM ${quoteIdentifier(tableName)}), 0) WHERE name = ${quoteLiteral(
+                            tableName
+                        )}`
+                    )
+                } catch (error) {
+                    console.warn(
+                        `Unable to update sqlite_sequence for ${tableName}:`,
+                        error.message
+                    )
+                }
+            }
+        }
+
+        console.log(`Updated ${tableName} table to reference donors directly.`)
+        return true
+    } catch (error) {
+        console.error(`Failed to update ${tableName} table:`, error.message)
+        return false
+    } finally {
+        if (foreignKeysInitiallyEnabled) {
+            try {
+                db.pragma('foreign_keys = ON')
+            } catch (error) {
+                console.warn(
+                    `Unable to re-enable foreign keys after ${tableName} rebuild:`,
+                    error.message
+                )
+            }
+        }
+    }
+}
+
+const rebuildRemainingLegacyDonorReferences = () => {
+    try {
+        const tables = db
+            .prepare(
+                `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '%_new' AND name NOT IN ('donors', 'donors_legacy')`
+            )
+            .all()
+
+        for (const { name } of tables) {
+            replaceLegacyDonorReferencesInTable(name)
+        }
+    } catch (error) {
+        console.warn(
+            'Unable to inspect schema for lingering donors_legacy references:',
+            error.message
+        )
     }
 }
 
@@ -1537,6 +1703,7 @@ const migrateDonorsTable = () => {
         rebuildLegacyCallOutcomes()
         rebuildLegacyClientDonorResearch()
         rebuildLegacyClientDonorNotes()
+        rebuildRemainingLegacyDonorReferences()
     } catch (error) {
         console.error('Failed to update donors table schema:', error.message)
     } finally {
