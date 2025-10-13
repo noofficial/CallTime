@@ -467,8 +467,8 @@ const resolveClientIdFromInputs = (rawId, label, fallback, lookup) => {
 
 const transformDonorRow = (row, fallbackClientId, clientLookup) => {
     const donorId = parseInteger(row.id)
-    const firstName = cleanString(row.first_name)
-    const lastName = cleanString(row.last_name)
+    let firstName = cleanString(row.first_name)
+    let lastName = cleanString(row.last_name)
     let name = cleanString(row.name)
 
     if (!name) {
@@ -478,6 +478,16 @@ const transformDonorRow = (row, fallbackClientId, clientLookup) => {
 
     if (!name) {
         return { error: 'Missing donor name' }
+    }
+
+    if (!firstName && !lastName && name) {
+        const parts = name.split(/\s+/).filter(Boolean)
+        if (parts.length === 1) {
+            firstName = parts[0]
+        } else if (parts.length > 1) {
+            firstName = parts.shift()
+            lastName = parts.join(' ') || null
+        }
     }
 
     const explicitClientProvided = hasValue(row.client_id) || hasValue(row.client_label)
