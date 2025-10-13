@@ -528,6 +528,35 @@ const resolveClientIdFromInputs = (rawId, label, fallback, lookup) => {
     return null
 }
 
+const normalizeClientIdForStorage = (value) => {
+    if (value === null || value === undefined) {
+        return null
+    }
+
+    if (typeof value === 'number') {
+        return Number.isInteger(value) && value > 0 ? value : null
+    }
+
+    if (typeof value === 'string') {
+        const trimmed = value.trim()
+        if (!trimmed) return null
+
+        if (/^\d+$/.test(trimmed)) {
+            const parsed = parseInt(trimmed, 10)
+            return parsed > 0 ? parsed : null
+        }
+
+        return null
+    }
+
+    return null
+}
+
+const ensureDonorClientIdBinding = (donor) => ({
+    ...donor,
+    client_id: normalizeClientIdForStorage(donor.client_id),
+})
+
 const transformDonorRow = (row, fallbackClientId, clientLookup) => {
     const donorId = parseInteger(row.id)
     let firstName = cleanString(row.first_name)
@@ -567,8 +596,10 @@ const transformDonorRow = (row, fallbackClientId, clientLookup) => {
 
     const address = deriveAddressFields(row)
 
+    const normalizedClientId = normalizeClientIdForStorage(resolvedClientId)
+
     const donor = {
-        client_id: resolvedClientId ?? null,
+        client_id: normalizedClientId,
         name,
         first_name: firstName,
         last_name: lastName,
@@ -590,7 +621,7 @@ const transformDonorRow = (row, fallbackClientId, clientLookup) => {
         photo_url: cleanString(row.photo_url),
     }
 
-    return { donor, donorId, clientId: resolvedClientId ?? null }
+    return { donor, donorId, clientId: normalizedClientId }
 }
 
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 8 // 8 hours
@@ -1032,6 +1063,31 @@ const rebuildDonorsTableFromSource = (sourceTable) => {
     )
 }
 
+const normalizeExistingDonorClientIds = () => {
+    if (!tableHasColumn('donors', 'client_id')) {
+        return
+    }
+
+    try {
+        db.exec(`
+            UPDATE donors
+            SET client_id = NULL
+            WHERE client_id IS NOT NULL
+              AND (
+                  TRIM(CAST(client_id AS TEXT)) = ''
+                  OR CAST(client_id AS INTEGER) <= 0
+              )
+        `)
+        db.exec(`
+            UPDATE donors
+            SET client_id = CAST(client_id AS INTEGER)
+            WHERE client_id IS NOT NULL
+        `)
+    } catch (error) {
+        console.warn('Unable to normalize donor client identifiers:', error.message)
+    }
+}
+
 const disableForeignKeysForMigration = () => {
     let wasEnabled = 0
     try {
@@ -1367,6 +1423,7 @@ ${DONORS_TABLE_COLUMNS_SQL}
             CREATE INDEX IF NOT EXISTS idx_call_sessions_client ON call_sessions(client_id);
         `)
         migrateDonorsTable()
+        normalizeExistingDonorClientIds()
         ensureColumn('donors', 'first_name', 'first_name TEXT')
         ensureColumn('donors', 'last_name', 'last_name TEXT')
         ensureColumn('donors', 'job_title', 'job_title TEXT')
@@ -1871,6 +1928,7 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
                 }
 
                 const { donor, donorId, clientId } = transformed
+                const donorForStorage = ensureDonorClientIdBinding(donor)
                 const contributionResult = transformContributionRows(contributions)
                 contributionResult.errors.forEach((error) => {
                     summary.contributionErrors += 1
@@ -1882,16 +1940,16 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
                     if (donorId) {
                         const existing = getDonorById.get(donorId)
                         if (existing) {
-                            updateStmt.run({ ...donor, id: donorId })
+                            updateStmt.run({ ...donorForStorage, id: donorId })
                             finalDonorId = donorId
                             summary.updated += 1
                         } else {
-                            const result = insertStmt.run(donor)
+                            const result = insertStmt.run(donorForStorage)
                             finalDonorId = result.lastInsertRowid
                             summary.inserted += 1
                         }
                     } else {
-                        const result = insertStmt.run(donor)
+                        const result = insertStmt.run(donorForStorage)
                         finalDonorId = result.lastInsertRowid
                         summary.inserted += 1
                     }
@@ -2576,9 +2634,13 @@ app.get('/api/clients/:clientId/donors-legacy', authenticateManager, (req, res) 
 
 // Create donor
 app.post('/api/clients/:clientId/donors', authenticateManager, (req, res) => {
-    const c = req.params.clientId
+    const ownerClientId = normalizeClientIdForStorage(req.params.clientId)
     const d = req.body || {}
     if (!d.name) return res.status(400).json({ error: 'name required' })
+
+    if (!ownerClientId) {
+        return res.status(400).json({ error: 'Invalid client id' })
+    }
 
     try {
         const donorStmt = db.prepare(`
@@ -2594,7 +2656,7 @@ app.post('/api/clients/:clientId/donors', authenticateManager, (req, res) => {
         const state = cleanString(d.state ?? d.region)
         const postal = cleanString(d.postal_code ?? d.postalCode)
         const donorResult = donorStmt.run(
-            c,
+            ownerClientId,
             d.name,
             d.phone,
             d.email,
@@ -2618,7 +2680,7 @@ app.post('/api/clients/:clientId/donors', authenticateManager, (req, res) => {
             INSERT INTO donor_assignments (client_id, donor_id, assigned_by)
             VALUES (?, ?, ?)
         `)
-        assignStmt.run(c, donorResult.lastInsertRowid, 'auto-assign')
+        assignStmt.run(ownerClientId, donorResult.lastInsertRowid, 'auto-assign')
 
         res.json({ id: donorResult.lastInsertRowid })
     } catch (error) {
@@ -2691,33 +2753,10 @@ app.post('/api/donors', authenticateManager, (req, res) => {
         return res.status(400).json({ error: 'Assigned clients are invalid' })
     }
 
-    const exclusiveDonor = Boolean(parseBooleanFlag(payload.exclusiveDonor, { defaultValue: false }))
-
-    let exclusiveClientId = null
-    const exclusiveClientInput =
-        payload.exclusiveClientId ?? payload.exclusiveClient ?? payload.exclusive_client_id
-    if (exclusiveClientInput !== undefined && exclusiveClientInput !== null && exclusiveClientInput !== '') {
-        const parsedExclusive = parseInteger(exclusiveClientInput)
-        if (parsedExclusive === null) {
-            return res.status(400).json({ error: 'Exclusive donor assignment is invalid' })
-        }
-        exclusiveClientId = parsedExclusive
+    const ownerClientId = normalizeClientIdForStorage(numericClientIds[0])
+    if (!ownerClientId) {
+        return res.status(400).json({ error: 'Assigned clients are invalid' })
     }
-
-    if (exclusiveDonor) {
-        const fallbackExclusiveId = exclusiveClientId ?? (numericClientIds.length ? numericClientIds[0] : null)
-        if (!fallbackExclusiveId) {
-            return res.status(400).json({ error: 'Exclusive donors must be assigned to a single client' })
-        }
-        exclusiveClientId = fallbackExclusiveId
-        numericClientIds = [exclusiveClientId]
-    }
-
-    if (!exclusiveDonor) {
-        exclusiveClientId = null
-    }
-
-    const ownerClientId = exclusiveDonor ? exclusiveClientId : numericClientIds[0]
     const name = payload.name || `${payload.firstName || ''} ${payload.lastName || ''}`.trim()
 
     try {
