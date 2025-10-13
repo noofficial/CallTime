@@ -932,16 +932,41 @@ function renderAssignmentCard(donor, mode) {
   return card;
 }
 
+async function readAssignmentError(response, fallbackMessage) {
+  try {
+    const payload = await response.json();
+    if (payload && typeof payload === "object") {
+      const details = payload.error || payload.message;
+      if (details) {
+        return String(details);
+      }
+    }
+  } catch (error) {
+    // Ignore JSON parsing errors and fall through to the fallback message.
+  }
+  return fallbackMessage;
+}
+
 async function assignDonor(clientId, donorId) {
+  const numericClientId = Number.parseInt(clientId, 10);
+  const numericDonorId = Number.parseInt(donorId, 10);
+  if (!Number.isInteger(numericClientId) || !Number.isInteger(numericDonorId)) {
+    reportError(new Error("Select a client and donor before assigning."));
+    return;
+  }
+
   try {
     const response = await managerFetch("/api/manager/assign-donor", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId, donorId }),
+      body: JSON.stringify({ clientId: numericClientId, donorId: numericDonorId }),
     });
-    if (!response.ok) throw new Error("Unable to assign donor");
-    state.assignedIds.add(String(donorId));
-    await loadAssignmentsForClient(clientId);
+    if (!response.ok) {
+      const message = await readAssignmentError(response, "Unable to assign donor");
+      throw new Error(message);
+    }
+    state.assignedIds.add(String(numericDonorId));
+    await loadAssignmentsForClient(String(numericClientId));
     await loadDonors();
   } catch (error) {
     reportError(error);
@@ -949,13 +974,23 @@ async function assignDonor(clientId, donorId) {
 }
 
 async function unassignDonor(clientId, donorId) {
+  const numericClientId = Number.parseInt(clientId, 10);
+  const numericDonorId = Number.parseInt(donorId, 10);
+  if (!Number.isInteger(numericClientId) || !Number.isInteger(numericDonorId)) {
+    reportError(new Error("Select a client and donor before removing the assignment."));
+    return;
+  }
+
   try {
-    const response = await managerFetch(`/api/manager/assign-donor/${clientId}/${donorId}`, {
+    const response = await managerFetch(`/api/manager/assign-donor/${numericClientId}/${numericDonorId}`, {
       method: "DELETE",
     });
-    if (!response.ok) throw new Error("Unable to remove donor assignment");
-    state.assignedIds.delete(String(donorId));
-    await loadAssignmentsForClient(clientId);
+    if (!response.ok) {
+      const message = await readAssignmentError(response, "Unable to remove donor assignment");
+      throw new Error(message);
+    }
+    state.assignedIds.delete(String(numericDonorId));
+    await loadAssignmentsForClient(String(numericClientId));
     await loadDonors();
   } catch (error) {
     reportError(error);
