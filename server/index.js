@@ -7,6 +7,35 @@ const multer = require('multer')
 const xlsx = require('xlsx')
 const Database = require('better-sqlite3')
 
+const envFilePath = path.join(__dirname, '..', '.env')
+if (fs.existsSync(envFilePath)) {
+    try {
+        const contents = fs.readFileSync(envFilePath, 'utf8')
+        for (const rawLine of contents.split(/\r?\n/)) {
+            const line = rawLine.trim()
+            if (!line || line.startsWith('#')) continue
+            const separatorIndex = line.indexOf('=')
+            if (separatorIndex === -1) continue
+            const key = line.slice(0, separatorIndex).trim()
+            if (!key || Object.prototype.hasOwnProperty.call(process.env, key)) {
+                continue
+            }
+            let value = line.slice(separatorIndex + 1)
+            // Remove optional surrounding quotes
+            value = value.trim()
+            if (
+                (value.startsWith('"') && value.endsWith('"')) ||
+                (value.startsWith("'") && value.endsWith("'"))
+            ) {
+                value = value.slice(1, -1)
+            }
+            process.env[key] = value
+        }
+    } catch (error) {
+        console.warn(`Failed to load environment variables from ${envFilePath}:`, error)
+    }
+}
+
 const app = express()
 app.use(cors())
 app.use(express.json())

@@ -50,6 +50,10 @@ The manager workspace and client portal now require passwords.
   The legacy built-in password of `10231972Fn*` is only loaded automatically
   when `NODE_ENV` is set to `test` for automated suites; otherwise the server
   will refuse to boot without one of the environment variables configured.
+  You can place these credentials in a `.env` file in the project root (for
+  example, `MANAGER_PASSWORD=super-secret`) and they will be loaded
+  automatically when the server starts. Values in the environment override the
+  `.env` file so production deployments can set secrets directly.
 
 - **Client access:** new campaigns are provisioned with the temporary password
   `password`. Fundraisers select their campaign from the login list, enter the
