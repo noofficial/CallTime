@@ -904,6 +904,16 @@ const schemaEntryExists = (name, type = 'table') => {
     }
 }
 
+const deleteFromTableIfExists = (table, whereClause, params = []) => {
+    if (!schemaEntryExists(table, 'table')) {
+        return
+    }
+
+    const clause = whereClause ? ` ${whereClause}` : ''
+    const sql = `DELETE FROM ${table}${clause}`
+    db.prepare(sql).run(...params)
+}
+
 const createDonorsTableStructure = () => {
     db.exec(`CREATE TABLE IF NOT EXISTS donors (${DONORS_TABLE_COLUMNS_SQL})`)
     db.exec('CREATE INDEX IF NOT EXISTS idx_donors_client ON donors(client_id)')
@@ -2301,11 +2311,11 @@ app.delete('/api/clients/:clientId', authenticateManager, (req, res) => {
         }
 
         const removeClient = db.transaction((id) => {
-            db.prepare('DELETE FROM donor_assignments WHERE client_id = ?').run(id)
-            db.prepare('DELETE FROM client_donor_research WHERE client_id = ?').run(id)
-            db.prepare('DELETE FROM client_donor_notes WHERE client_id = ?').run(id)
-            db.prepare('DELETE FROM call_outcomes WHERE client_id = ?').run(id)
-            db.prepare('DELETE FROM call_sessions WHERE client_id = ?').run(id)
+            deleteFromTableIfExists('donor_assignments', 'WHERE client_id = ?', [id])
+            deleteFromTableIfExists('client_donor_research', 'WHERE client_id = ?', [id])
+            deleteFromTableIfExists('client_donor_notes', 'WHERE client_id = ?', [id])
+            deleteFromTableIfExists('call_outcomes', 'WHERE client_id = ?', [id])
+            deleteFromTableIfExists('call_sessions', 'WHERE client_id = ?', [id])
             db.prepare('DELETE FROM clients WHERE id = ?').run(id)
         })
 
@@ -2389,11 +2399,12 @@ app.delete('/api/donors/:donorId', authenticateManager, (req, res) => {
         }
 
         const removeDonor = db.transaction((id) => {
-            db.prepare('DELETE FROM donor_assignments WHERE donor_id = ?').run(id)
-            db.prepare('DELETE FROM client_donor_research WHERE donor_id = ?').run(id)
-            db.prepare('DELETE FROM client_donor_notes WHERE donor_id = ?').run(id)
-            db.prepare('DELETE FROM call_outcomes WHERE donor_id = ?').run(id)
-            db.prepare('DELETE FROM giving_history WHERE donor_id = ?').run(id)
+            deleteFromTableIfExists('donor_assignments', 'WHERE donor_id = ?', [id])
+            deleteFromTableIfExists('client_donor_research', 'WHERE donor_id = ?', [id])
+            deleteFromTableIfExists('client_donor_notes', 'WHERE donor_id = ?', [id])
+            deleteFromTableIfExists('call_outcomes', 'WHERE donor_id = ?', [id])
+            deleteFromTableIfExists('giving_history', 'WHERE donor_id = ?', [id])
+            deleteFromTableIfExists('interactions', 'WHERE donor_id = ?', [id])
             db.prepare('DELETE FROM donors WHERE id = ?').run(id)
         })
 
