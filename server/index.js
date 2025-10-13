@@ -806,7 +806,7 @@ const DONORS_COLUMN_ORDER = [
     'created_at',
 ]
 
-const relaxDonorClientConstraint = () => {
+const migrateDonorsTable = () => {
     let foreignKeysInitiallyEnabled = 0
 
     try {
@@ -816,7 +816,9 @@ const relaxDonorClientConstraint = () => {
         }
 
         const clientIdColumn = info.find((column) => column.name === 'client_id')
-        if (!clientIdColumn || clientIdColumn.notnull === 0) {
+        const clientIdIsRequired = clientIdColumn && clientIdColumn.notnull !== 0
+
+        if (!clientIdIsRequired) {
             return
         }
 
@@ -835,9 +837,8 @@ const relaxDonorClientConstraint = () => {
         }
 
         const migrate = db.transaction(() => {
-            db.exec(`ALTER TABLE donors RENAME TO donors_legacy`)
-            db.exec(`DROP INDEX IF EXISTS idx_donors_client`)
-            db.exec(`CREATE TABLE donors (${DONORS_TABLE_COLUMNS_SQL})`)
+            db.exec('DROP TABLE IF EXISTS donors_new')
+            db.exec(`CREATE TABLE donors_new (${DONORS_TABLE_COLUMNS_SQL})`)
 
             const availableColumns = info.map((column) => column.name)
             const transferableColumns = DONORS_COLUMN_ORDER.filter((column) =>
@@ -846,11 +847,14 @@ const relaxDonorClientConstraint = () => {
 
             if (transferableColumns.length) {
                 const columnList = transferableColumns.join(', ')
-                db.exec(`INSERT INTO donors (${columnList}) SELECT ${columnList} FROM donors_legacy`)
+                db.exec(
+                    `INSERT INTO donors_new (${columnList}) SELECT ${columnList} FROM donors`
+                )
             }
 
-            db.exec(`DROP TABLE donors_legacy`)
-            db.exec(`CREATE INDEX IF NOT EXISTS idx_donors_client ON donors(client_id)`)
+            db.exec('DROP TABLE donors')
+            db.exec('ALTER TABLE donors_new RENAME TO donors')
+            db.exec('CREATE INDEX IF NOT EXISTS idx_donors_client ON donors(client_id)')
             db.exec(
                 `UPDATE sqlite_sequence SET seq = (SELECT MAX(id) FROM donors) WHERE name = 'donors'`
             )
@@ -994,7 +998,7 @@ ${DONORS_TABLE_COLUMNS_SQL}
             CREATE INDEX IF NOT EXISTS idx_donor_assignments_donor ON donor_assignments(donor_id);
             CREATE INDEX IF NOT EXISTS idx_call_sessions_client ON call_sessions(client_id);
         `)
-        relaxDonorClientConstraint()
+        migrateDonorsTable()
         ensureColumn('donors', 'first_name', 'first_name TEXT')
         ensureColumn('donors', 'last_name', 'last_name TEXT')
         ensureColumn('donors', 'job_title', 'job_title TEXT')
