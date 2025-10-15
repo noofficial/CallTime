@@ -11,10 +11,9 @@ const state = {
   clients: [],
   assignments: new Map(),
   selectedDonorId: null,
-  searchTerm: "",
-  clientFilter: "",
-  assignmentFilter: "all",
-  contactFilter: "all",
+  filters: getDefaultFilters(),
+  hasExecutedSearch: false,
+  availableGivingCandidates: [],
   detailDraft: null,
   detailStatus: null,
   detailStatusTimeout: null,
@@ -43,13 +42,21 @@ const state = {
 };
 
 const elements = {
-  clientFilter: document.getElementById("database-client-filter"),
-  assignmentFilter: document.getElementById("database-assignment-filter"),
-  contactFilter: document.getElementById("database-contact-filter"),
-  search: document.getElementById("database-search"),
-  list: document.getElementById("database-list"),
+  searchForm: document.getElementById("donor-search-form"),
+  searchName: document.getElementById("donor-search-name"),
+  searchCandidates: document.getElementById("donor-search-candidates"),
+  searchMinAmount: document.getElementById("donor-search-min-amount"),
+  searchMaxAmount: document.getElementById("donor-search-max-amount"),
+  searchCity: document.getElementById("donor-search-city"),
+  searchCompany: document.getElementById("donor-search-company"),
+  searchTags: document.getElementById("donor-search-tags"),
+  searchReset: document.getElementById("donor-search-reset"),
+  resultsList: document.getElementById("database-results-list"),
+  resultsEmpty: document.getElementById("database-results-empty"),
+  resultsEmptyTitle: document.getElementById("database-results-empty-title"),
+  resultsEmptyMessage: document.getElementById("database-results-empty-message"),
   detail: document.getElementById("database-detail"),
-  empty: document.getElementById("database-empty"),
+  detailEmpty: document.getElementById("database-detail-empty"),
   export: document.getElementById("export-donors"),
   newDonorButton: document.getElementById("open-donor-modal"),
   givingInsightsOpen: document.getElementById("open-giving-insights"),
@@ -115,27 +122,16 @@ async function init() {
 }
 
 function bindEvents() {
-  elements.search?.addEventListener("input", () => {
-    state.searchTerm = elements.search.value.trim().toLowerCase();
-    applyFilters();
+  elements.searchForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    executeSearch();
+  });
+  elements.searchReset?.addEventListener("click", (event) => {
+    event.preventDefault();
+    resetSearchFilters();
     render();
   });
-  elements.clientFilter?.addEventListener("change", () => {
-    state.clientFilter = elements.clientFilter.value;
-    applyFilters();
-    render();
-  });
-  elements.assignmentFilter?.addEventListener("change", () => {
-    state.assignmentFilter = elements.assignmentFilter.value;
-    applyFilters();
-    render();
-  });
-  elements.contactFilter?.addEventListener("change", () => {
-    state.contactFilter = elements.contactFilter.value;
-    applyFilters();
-    render();
-  });
-  elements.list?.addEventListener("click", async (event) => {
+  elements.resultsList?.addEventListener("click", async (event) => {
     const createTrigger = event.target.closest("[data-open-donor-modal]");
     if (createTrigger) {
       event.preventDefault();
@@ -189,11 +185,109 @@ async function loadData() {
       ? sortDonors(donorList.map(normalizeDonorSummary))
       : [];
     state.assignments = buildAssignmentMap(state.donors);
-    renderClientFilter();
+    state.availableGivingCandidates = buildGivingCandidates(state.donors);
+    renderCandidateFilter();
     applyFilters();
   } catch (error) {
     console.error("Failed to load donors", error);
   }
+}
+
+function executeSearch() {
+  state.filters = collectSearchFilters();
+  state.hasExecutedSearch = true;
+  applyFilters();
+  render();
+}
+
+function resetSearchFilters() {
+  state.filters = getDefaultFilters();
+  state.hasExecutedSearch = false;
+  state.filtered = [];
+  state.selectedDonorId = null;
+  if (elements.searchForm instanceof HTMLFormElement) {
+    elements.searchForm.reset();
+  }
+  if (elements.searchCandidates instanceof HTMLSelectElement) {
+    Array.from(elements.searchCandidates.options).forEach((option) => {
+      option.selected = false;
+    });
+  }
+  renderCandidateFilter();
+  applyFilters();
+}
+
+function collectSearchFilters() {
+  const candidates = elements.searchCandidates instanceof HTMLSelectElement
+    ? Array.from(elements.searchCandidates.selectedOptions)
+        .map((option) => option.value)
+        .filter(Boolean)
+    : [];
+  return {
+    name: (elements.searchName?.value || "").trim(),
+    candidates,
+    minAmount: (elements.searchMinAmount?.value || "").trim(),
+    maxAmount: (elements.searchMaxAmount?.value || "").trim(),
+    city: (elements.searchCity?.value || "").trim(),
+    company: (elements.searchCompany?.value || "").trim(),
+    tags: (elements.searchTags?.value || "").trim(),
+  };
+}
+
+function getDefaultFilters() {
+  return {
+    name: "",
+    candidates: [],
+    minAmount: "",
+    maxAmount: "",
+    city: "",
+    company: "",
+    tags: "",
+  };
+}
+
+function parseAmountInput(value) {
+  if (value === undefined || value === null) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  const numeric = Number.parseFloat(trimmed.replace(/[^0-9.\-]/g, ""));
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function buildGivingCandidates(donors = []) {
+  const candidateSet = new Set();
+  donors.forEach((donor) => {
+    if (!donor) return;
+    const list = Array.isArray(donor.givingCandidates) ? donor.givingCandidates : [];
+    list.forEach((candidate) => {
+      if (candidate) {
+        candidateSet.add(candidate);
+      }
+    });
+  });
+  return Array.from(candidateSet).sort((a, b) => a.localeCompare(b));
+}
+
+function renderCandidateFilter() {
+  const select = elements.searchCandidates;
+  if (!(select instanceof HTMLSelectElement)) return;
+  const selectedValues = new Set(state.filters?.candidates || []);
+  select.innerHTML = "";
+  if (!state.availableGivingCandidates.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No recorded giving history";
+    option.disabled = true;
+    select.append(option);
+    return;
+  }
+  state.availableGivingCandidates.forEach((candidate) => {
+    const option = document.createElement("option");
+    option.value = candidate;
+    option.textContent = candidate;
+    option.selected = selectedValues.has(candidate);
+    select.append(option);
+  });
 }
 
 function normalizeClient(client) {
@@ -216,6 +310,14 @@ function normalizeDonorSummary(donor) {
     donor.suggested_ask === null || donor.suggested_ask === undefined
       ? null
       : Number(donor.suggested_ask);
+  const totalContributedRaw =
+    donor.total_contributed !== undefined && donor.total_contributed !== null
+      ? Number(donor.total_contributed)
+      : donor.totalContributed !== undefined && donor.totalContributed !== null
+        ? Number(donor.totalContributed)
+        : null;
+  const totalContributed = Number.isFinite(totalContributedRaw) ? totalContributedRaw : 0;
+  const givingCandidates = parseDelimitedList(donor.donated_candidates || donor.giving_candidates);
   return {
     id,
     name: name || "New donor",
@@ -233,6 +335,8 @@ function normalizeDonorSummary(donor) {
     industry: donor.occupation || "",
     tags: donor.tags || "",
     ask: Number.isNaN(askValue) ? null : askValue,
+    totalContributed,
+    givingCandidates,
     lastGift: donor.last_gift_note || "",
     notes: donor.notes || "",
     biography: donor.bio || "",
@@ -255,6 +359,23 @@ function parseAssignedIds(raw) {
     .filter(Boolean);
 }
 
+function parseDelimitedList(raw) {
+  if (!raw) return [];
+  const seen = new Set();
+  const values = [];
+  String(raw)
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .forEach((value) => {
+      if (!seen.has(value)) {
+        seen.add(value);
+        values.push(value);
+      }
+    });
+  return values;
+}
+
 function buildAssignmentMap(donors) {
   const map = new Map();
   donors.forEach((donor) => {
@@ -273,78 +394,80 @@ function sortDonors(list = []) {
 }
 
 function applyFilters() {
-  const term = state.searchTerm;
-  const filterId = state.clientFilter;
-  const assignmentFilter = state.assignmentFilter;
-  const contactFilter = state.contactFilter;
+  if (!state.hasExecutedSearch) {
+    state.filtered = [];
+    state.selectedDonorId = null;
+    return;
+  }
+  const filters = state.filters || getDefaultFilters();
+  const nameTerm = filters.name.toLowerCase();
+  const cityTerm = filters.city.toLowerCase();
+  const companyTerm = filters.company.toLowerCase();
+  const tagsTerm = filters.tags.toLowerCase();
+  const minAmount = parseAmountInput(filters.minAmount);
+  const maxAmount = parseAmountInput(filters.maxAmount);
+  const candidateSet = new Set(
+    Array.isArray(filters.candidates)
+      ? filters.candidates.map((candidate) => candidate.toLowerCase())
+      : [],
+  );
+
   state.filtered = state.donors.filter((donor) => {
-    if (term) {
-      const haystack = [
-        donor.name,
-        donor.firstName,
-        donor.lastName,
-        donor.email,
-        donor.phone,
-        donor.city,
-        donor.state,
-        donor.postalCode,
-        donor.street,
-        donor.addressLine2,
-        donor.company,
-        donor.title,
-        donor.industry,
-        donor.tags,
-      ]
+    if (!donor) return false;
+    if (nameTerm) {
+      const nameHaystack = [donor.name, donor.firstName, donor.lastName]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
-      if (!haystack.includes(term)) {
+      if (!nameHaystack.includes(nameTerm)) {
         return false;
       }
     }
-    if (filterId) {
-      const assigned = state.assignments.get(donor.id);
-      if (!assigned || !assigned.has(filterId)) {
+    if (candidateSet.size) {
+      const donorCandidates = Array.isArray(donor.givingCandidates)
+        ? donor.givingCandidates.map((candidate) => candidate.toLowerCase())
+        : [];
+      const hasCandidate = donorCandidates.some((candidate) => candidateSet.has(candidate));
+      if (!hasCandidate) {
         return false;
       }
     }
-    if (assignmentFilter && assignmentFilter !== "all") {
-      const assigned = state.assignments.get(donor.id);
-      const count = assigned ? assigned.size : 0;
-      if (assignmentFilter === "assigned" && count === 0) {
-        return false;
-      }
-      if (assignmentFilter === "unassigned" && count > 0) {
+    const total = Number.isFinite(donor.totalContributed) ? donor.totalContributed : 0;
+    if (minAmount !== null && total < minAmount) {
+      return false;
+    }
+    if (maxAmount !== null && total > maxAmount) {
+      return false;
+    }
+    if (cityTerm) {
+      const cityHaystack = [donor.city, donor.state, donor.postalCode]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      if (!cityHaystack.includes(cityTerm)) {
         return false;
       }
     }
-    if (contactFilter && contactFilter !== "all") {
-      const hasEmail = Boolean(donor.email && donor.email.trim());
-      const hasPhone = Boolean(donor.phone && donor.phone.trim());
-      if (contactFilter === "email" && !hasEmail) {
+    if (companyTerm) {
+      const companyHaystack = [donor.company, donor.title, donor.industry]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      if (!companyHaystack.includes(companyTerm)) {
         return false;
       }
-      if (contactFilter === "phone" && !hasPhone) {
-        return false;
-      }
-      if (contactFilter === "both" && (!hasEmail || !hasPhone)) {
-        return false;
-      }
-      if (contactFilter === "none" && (hasEmail || hasPhone)) {
+    }
+    if (tagsTerm) {
+      const tagsHaystack = (donor.tags || "").toLowerCase();
+      if (!tagsHaystack.includes(tagsTerm)) {
         return false;
       }
     }
     return true;
   });
-  if (!state.filtered.length) {
+
+  if (state.selectedDonorId && !state.filtered.some((donor) => donor.id === state.selectedDonorId)) {
     state.selectedDonorId = null;
-    return;
-  }
-  if (
-    state.selectedDonorId &&
-    !state.filtered.some((donor) => donor.id === state.selectedDonorId)
-  ) {
-    state.selectedDonorId = state.filtered[0].id;
   }
 }
 
@@ -433,89 +556,117 @@ function normalizeDonorDetail(detail) {
 }
 
 function render() {
-  renderDonorList();
+  renderSearchResults();
   renderDonorDetail();
   renderGivingInsights();
 }
 
-function renderClientFilter() {
-  const select = elements.clientFilter;
-  if (!select) return;
-  const previous = select.value;
-  select.innerHTML = "";
-  const allOption = document.createElement("option");
-  allOption.value = "";
-  allOption.textContent = "All candidates";
-  select.append(allOption);
-  state.clients.forEach((client) => {
-    if (!client) return;
-    const option = document.createElement("option");
-    option.value = client.id;
-    option.textContent = client.label || client.candidate || "Unnamed candidate";
-    select.append(option);
-  });
-  if (previous && state.clients.some((client) => client?.id === previous)) {
-    select.value = previous;
-    state.clientFilter = previous;
-  } else {
-    select.value = "";
-    state.clientFilter = "";
-  }
-}
+function renderSearchResults() {
+  const list = elements.resultsList;
+  const empty = elements.resultsEmpty;
+  const emptyTitle = elements.resultsEmptyTitle;
+  const emptyMessage = elements.resultsEmptyMessage;
+  if (!list || !empty || !emptyTitle || !emptyMessage) return;
 
-function renderDonorList() {
-  const list = elements.list;
-  if (!list) return;
   list.innerHTML = "";
-  if (!state.filtered.length) {
-    const emptyItem = document.createElement("li");
-    emptyItem.className = "database-list__empty";
-    emptyItem.innerHTML = `
-      <p>No donors match your current filters.</p>
-      <button class="btn btn--ghost" type="button" data-open-donor-modal>Create a donor</button>
-    `;
-    list.append(emptyItem);
+
+  if (!state.hasExecutedSearch) {
+    setResultsEmptyState("Search donors", "Enter one or more filters above, then search to see matching donors.");
+    empty.classList.remove("hidden");
+    list.classList.add("hidden");
+    if (elements.detailEmpty) {
+      elements.detailEmpty.classList.add("hidden");
+    }
     return;
   }
+
+  if (!state.filtered.length) {
+    setResultsEmptyState("No donors found", "Try adjusting your filters or clearing them to expand the results.");
+    empty.classList.remove("hidden");
+    list.classList.add("hidden");
+    if (elements.detailEmpty) {
+      elements.detailEmpty.classList.add("hidden");
+    }
+    return;
+  }
+
+  empty.classList.add("hidden");
+  list.classList.remove("hidden");
+
   state.filtered.forEach((donor) => {
     const item = document.createElement("li");
     item.className = "database-list__item";
     if (donor.id === state.selectedDonorId) {
       item.classList.add("database-list__item--active");
     }
+
     const button = document.createElement("button");
     button.type = "button";
     button.className = "database-list__button";
     button.setAttribute("data-donor-id", donor.id);
-    const metaParts = [];
-    const location = buildLocationLabel(donor.city, donor.state, donor.postalCode);
-    if (location) metaParts.push(location);
-    if (donor.title) metaParts.push(donor.title);
-    if (donor.company) metaParts.push(donor.company);
+
+    const metaLines = [];
     const assigned = state.assignments.get(donor.id) || new Set();
     const assignedCount = assigned.size;
     const focusLabel = assignedCount
       ? `${assignedCount} focus ${assignedCount === 1 ? "list" : "lists"}`
       : "Not assigned";
-    const subtitle = metaParts.length ? `${metaParts.join(" • ")} • ${focusLabel}` : focusLabel;
-    button.innerHTML = `
-      <span class="database-list__title">${escapeHtml(donor.name || "New donor")}</span>
-      <span class="database-list__meta">${escapeHtml(subtitle)}</span>
-    `;
+    const totalLabel = donor.totalContributed > 0
+      ? `$${formatCurrency(donor.totalContributed)} recorded`
+      : "No giving history";
+    metaLines.push(`${totalLabel} • ${focusLabel}`);
+
+    const location = buildLocationLabel(donor.city, donor.state, donor.postalCode);
+    const professionalParts = [location, donor.company, donor.title].filter(Boolean);
+    if (professionalParts.length) {
+      metaLines.push(professionalParts.join(" • "));
+    }
+
+    const candidateSummary = formatCandidateSummary(donor.givingCandidates);
+    if (candidateSummary) {
+      metaLines.push(`Donated to: ${candidateSummary}`);
+    }
+
+    button.innerHTML = [
+      `<span class="database-list__title">${escapeHtml(donor.name || "New donor")}</span>`,
+      ...metaLines.map((line) => `<span class="database-list__meta">${escapeHtml(line)}</span>`),
+    ].join("");
+
     item.append(button);
     list.append(item);
   });
+
+  if (!state.selectedDonorId && elements.detailEmpty) {
+    elements.detailEmpty.classList.remove("hidden");
+    elements.detailEmpty.removeAttribute("aria-hidden");
+    elements.detailEmpty.removeAttribute("hidden");
+  }
+}
+
+function setResultsEmptyState(title, message) {
+  if (elements.resultsEmptyTitle) {
+    elements.resultsEmptyTitle.textContent = title;
+  }
+  if (elements.resultsEmptyMessage) {
+    elements.resultsEmptyMessage.textContent = message;
+  }
 }
 
 function renderDonorDetail() {
   const container = elements.detail;
-  const empty = elements.empty;
+  const empty = elements.detailEmpty;
   if (!container || !empty) return;
   container.querySelectorAll(".donor-profile").forEach((node) => node.remove());
   if (!state.selectedDonorId) {
-    empty.classList.remove("hidden");
-    empty.removeAttribute("aria-hidden");
-    empty.removeAttribute("hidden");
+    if (state.hasExecutedSearch && state.filtered.length) {
+      empty.classList.remove("hidden");
+      empty.removeAttribute("aria-hidden");
+      empty.removeAttribute("hidden");
+    } else {
+      empty.classList.add("hidden");
+      empty.setAttribute("aria-hidden", "true");
+      empty.setAttribute("hidden", "true");
+    }
     return;
   }
   const summary = state.donors.find((item) => item.id === state.selectedDonorId);
@@ -726,6 +877,20 @@ function buildLocationLabel(city, state, postalCode) {
     return locality ? `${locality} ${postalCode}` : postalCode;
   }
   return locality;
+}
+
+function formatCandidateSummary(candidates = []) {
+  if (!Array.isArray(candidates) || !candidates.length) {
+    return "";
+  }
+  if (candidates.length === 1) {
+    return candidates[0];
+  }
+  if (candidates.length === 2) {
+    return `${candidates[0]}, ${candidates[1]}`;
+  }
+  const [first, second, ...rest] = candidates;
+  return `${first}, ${second} +${rest.length} more`;
 }
 
 function buildDraftMeta(values) {
@@ -1611,6 +1776,8 @@ async function refreshData({
       const normalized = sortDonors(donors.map(normalizeDonorSummary));
       state.donors = normalized;
       state.assignments = buildAssignmentMap(state.donors);
+      state.availableGivingCandidates = buildGivingCandidates(state.donors);
+      renderCandidateFilter();
     }
     if (!skipClients) {
       const overview = await fetchJson("/api/manager/overview");
