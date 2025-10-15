@@ -2038,12 +2038,21 @@ app.get('/api/manager/donors', authenticateManager, (req, res) => {
     try {
         const donors = db.prepare(`
             SELECT d.*,
-                   GROUP_CONCAT(c.name) as assigned_clients,
-                   GROUP_CONCAT(c.id) as assigned_client_ids,
-                   COUNT(da.client_id) as assignment_count
+                   GROUP_CONCAT(DISTINCT c.name) as assigned_clients,
+                   GROUP_CONCAT(DISTINCT c.id) as assigned_client_ids,
+                   COUNT(DISTINCT da.client_id) as assignment_count,
+                   COALESCE(gh.total_contributed, 0) as total_contributed,
+                   gh.donated_candidates
             FROM donors d
             LEFT JOIN donor_assignments da ON d.id = da.donor_id AND da.is_active = 1
             LEFT JOIN clients c ON da.client_id = c.id
+            LEFT JOIN (
+                SELECT donor_id,
+                       SUM(amount) AS total_contributed,
+                       GROUP_CONCAT(DISTINCT candidate) AS donated_candidates
+                FROM giving_history
+                GROUP BY donor_id
+            ) gh ON gh.donor_id = d.id
             GROUP BY d.id
             ORDER BY d.name
         `).all()
