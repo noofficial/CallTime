@@ -9,6 +9,10 @@ const state = {
 const elements = {
   form: document.getElementById("donor-editor-form"),
   status: document.getElementById("editor-status"),
+  firstName: document.getElementById("editor-first-name"),
+  lastName: document.getElementById("editor-last-name"),
+  businessToggle: document.getElementById("editor-business-toggle"),
+  businessName: document.getElementById("editor-business-name"),
   assignments: document.getElementById("editor-client-assignments"),
   selectAll: document.getElementById("select-all-clients"),
   exclusiveToggle: document.getElementById("editor-exclusive-toggle"),
@@ -68,6 +72,7 @@ function bindEvents() {
   elements.selectAll?.addEventListener("click", handleSelectAllClients);
   elements.exclusiveToggle?.addEventListener("change", handleExclusiveToggle);
   elements.exclusiveClient?.addEventListener("change", handleExclusiveClientChange);
+  elements.businessToggle?.addEventListener("change", handleBusinessToggle);
 }
 
 function resetEditorState() {
@@ -76,6 +81,12 @@ function resetEditorState() {
   state.exclusiveDonor = false;
   state.exclusiveClientId = "";
   elements.form?.reset();
+  if (elements.businessToggle) {
+    elements.businessToggle.value = "no";
+  }
+  if (elements.businessName) {
+    elements.businessName.value = "";
+  }
   if (elements.exclusiveToggle) {
     elements.exclusiveToggle.value = "no";
   }
@@ -83,6 +94,7 @@ function resetEditorState() {
     elements.exclusiveClient.value = "";
     elements.exclusiveClient.setAttribute("disabled", "true");
   }
+  updateBusinessFieldState();
   if (elements.historyYear) elements.historyYear.value = "";
   if (elements.historyCandidate) elements.historyCandidate.value = "";
   if (elements.historyOffice) elements.historyOffice.value = "";
@@ -143,6 +155,8 @@ async function handleSubmit(event) {
   const payload = {
     firstName: formData.get("firstName")?.toString().trim() || "",
     lastName: formData.get("lastName")?.toString().trim() || "",
+    isBusiness: (formData.get("isBusiness")?.toString() || "no") === "yes",
+    businessName: formData.get("businessName")?.toString().trim() || "",
     email: formData.get("email")?.toString().trim() || "",
     phone: formData.get("phone")?.toString().trim() || "",
     street: formData.get("street")?.toString().trim() || "",
@@ -269,6 +283,23 @@ function handleExclusiveClientChange(event) {
     state.assignedClients = new Set([value]);
   }
   renderAssignments();
+}
+
+function handleBusinessToggle() {
+  updateBusinessFieldState();
+}
+
+function updateBusinessFieldState() {
+  const isBusiness = elements.businessToggle?.value === "yes";
+  if (elements.businessName) {
+    elements.businessName.required = Boolean(isBusiness);
+  }
+  if (elements.firstName) {
+    elements.firstName.required = !isBusiness;
+  }
+  if (elements.lastName) {
+    elements.lastName.required = !isBusiness;
+  }
 }
 
 function renderAssignments() {

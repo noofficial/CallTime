@@ -145,6 +145,12 @@ const DONOR_COLUMN_MAP = new Map([
     ['id', 'id'],
     ['donorid', 'id'],
     ['recordid', 'id'],
+    ['businessentity', 'is_business'],
+    ['businessentityyesorno', 'is_business'],
+    ['businessentityyesno', 'is_business'],
+    ['isbusiness', 'is_business'],
+    ['businessname', 'business_name'],
+    ['organizationname', 'business_name'],
 ])
 
 const CONTRIBUTION_PREFIXES = [
@@ -570,24 +576,42 @@ const transformDonorRow = (row, fallbackClientId, clientLookup) => {
     let firstName = cleanString(row.first_name)
     let lastName = cleanString(row.last_name)
     let name = cleanString(row.name)
+    const isBusiness = parseBooleanFlag(row.is_business, { defaultValue: false })
+    let businessName = cleanString(row.business_name)
 
-    if (!name) {
-        const combined = [firstName, lastName].filter(Boolean).join(' ').trim()
-        name = combined || null
-    }
-
-    if (!name) {
-        return { error: 'Missing donor name' }
-    }
-
-    if (!firstName && !lastName && name) {
-        const parts = name.split(/\s+/).filter(Boolean)
-        if (parts.length === 1) {
-            firstName = parts[0]
-        } else if (parts.length > 1) {
-            firstName = parts.shift()
-            lastName = parts.join(' ') || null
+    if (isBusiness) {
+        if (!businessName) {
+            businessName = cleanString(row.employer) || name
         }
+
+        if (!businessName) {
+            return { error: 'Missing business name' }
+        }
+
+        name = businessName
+        firstName = null
+        lastName = null
+    } else {
+        if (!name) {
+            const combined = [firstName, lastName].filter(Boolean).join(' ').trim()
+            name = combined || null
+        }
+
+        if (!name) {
+            return { error: 'Missing donor name' }
+        }
+
+        if (!firstName && !lastName && name) {
+            const parts = name.split(/\s+/).filter(Boolean)
+            if (parts.length === 1) {
+                firstName = parts[0]
+            } else if (parts.length > 1) {
+                firstName = parts.shift()
+                lastName = parts.join(' ') || null
+            }
+        }
+
+        businessName = null
     }
 
     const explicitClientProvided = hasValue(row.client_id) || hasValue(row.client_label)
@@ -611,6 +635,8 @@ const transformDonorRow = (row, fallbackClientId, clientLookup) => {
         name,
         first_name: firstName,
         last_name: lastName,
+        is_business: isBusiness ? 1 : 0,
+        business_name: isBusiness ? businessName : null,
         phone: cleanString(row.phone),
         email: cleanString(row.email),
         street_address: address.street_address,
@@ -900,6 +926,8 @@ const DONORS_TABLE_COLUMNS_SQL = `
     name TEXT NOT NULL,
     first_name TEXT,
     last_name TEXT,
+    is_business INTEGER DEFAULT 0,
+    business_name TEXT,
     phone TEXT,
     email TEXT,
     street_address TEXT,
@@ -1000,6 +1028,8 @@ const DONORS_COLUMN_ORDER = [
     'name',
     'first_name',
     'last_name',
+    'is_business',
+    'business_name',
     'phone',
     'email',
     'street_address',
@@ -2283,12 +2313,12 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
 
         const insertStmt = db.prepare(`
             INSERT INTO donors (
-                client_id, name, first_name, last_name, phone, email,
+                client_id, name, first_name, last_name, is_business, business_name, phone, email,
                 street_address, address_line2, city, state, postal_code,
                 employer, occupation, job_title, tags, suggested_ask, last_gift_note,
                 notes, bio, photo_url
             ) VALUES (
-                @client_id, @name, @first_name, @last_name, @phone, @email,
+                @client_id, @name, @first_name, @last_name, @is_business, @business_name, @phone, @email,
                 @street_address, @address_line2, @city, @state, @postal_code,
                 @employer, @occupation, @job_title, @tags, @suggested_ask, @last_gift_note,
                 @notes, @bio, @photo_url
@@ -2301,6 +2331,8 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
                 name = @name,
                 first_name = COALESCE(@first_name, first_name),
                 last_name = COALESCE(@last_name, last_name),
+                is_business = COALESCE(@is_business, is_business),
+                business_name = COALESCE(@business_name, business_name),
                 phone = COALESCE(@phone, phone),
                 email = COALESCE(@email, email),
                 street_address = COALESCE(@street_address, street_address),
@@ -3231,10 +3263,6 @@ app.post('/api/donors', authenticateManager, (req, res) => {
         ? payload.assignedClientIds.filter((id) => id !== undefined && id !== null)
         : []
 
-    if (!payload.firstName && !payload.lastName && !payload.name) {
-        return res.status(400).json({ error: 'Donor name is required' })
-    }
-
     if (!assignedClientIds.length) {
         return res.status(400).json({ error: 'At least one client assignment is required' })
     }
@@ -3272,19 +3300,58 @@ app.post('/api/donors', authenticateManager, (req, res) => {
     if (!ownerClientId) {
         return res.status(400).json({ error: 'Assigned clients are invalid' })
     }
-    const name = payload.name || `${payload.firstName || ''} ${payload.lastName || ''}`.trim()
+    let firstNameValue = cleanString(payload.firstName)
+    let lastNameValue = cleanString(payload.lastName)
+    const providedName = cleanString(payload.name)
+    const businessFlagInput =
+        payload.isBusiness ??
+        payload.businessEntity ??
+        payload.is_business ??
+        payload.business
+    let isBusiness = parseBooleanFlag(businessFlagInput, { defaultValue: false })
+    let businessName = cleanString(
+        payload.businessName ??
+            payload.business_name ??
+            payload.companyName ??
+            payload.businessLabel ??
+            null
+    )
+    if (isBusiness && !businessName) {
+        businessName = cleanString(payload.company)
+    }
+
+    let resolvedName = providedName || `${firstNameValue || ''} ${lastNameValue || ''}`.trim()
+
+    if (isBusiness) {
+        resolvedName = businessName || resolvedName
+        if (!cleanString(resolvedName)) {
+            return res.status(400).json({ error: 'Business donors must include a business name' })
+        }
+        businessName = cleanString(resolvedName)
+        firstNameValue = null
+        lastNameValue = null
+    } else {
+        businessName = null
+    }
+
+    resolvedName = cleanString(resolvedName)
+    if (!resolvedName) {
+        return res.status(400).json({ error: 'Donor name is required' })
+    }
 
     try {
         const stmt = db.prepare(`
             INSERT INTO donors (
                 client_id, exclusive_donor, exclusive_client_id,
-                name, first_name, last_name, phone, email,
+                name, first_name, last_name, is_business, business_name,
+                phone, email,
                 street_address, address_line2, city, state, postal_code,
                 employer, occupation, job_title, tags, suggested_ask, last_gift_note,
                 notes, bio, photo_url
             ) VALUES (
                 ?, ?, ?,
                 ?, ?, ?, ?, ?,
+                ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?,
                 ?, ?, ?
@@ -3297,29 +3364,49 @@ app.post('/api/donors', authenticateManager, (req, res) => {
         const state = cleanString(payload.state)
         const postal = cleanString(payload.postalCode ?? payload.postal)
 
+        const phoneValue = cleanString(payload.phone)
+        const emailValue = cleanString(payload.email)
+        const companyValue = cleanString(payload.company)
+        const occupationValue = cleanString(payload.industry)
+        const jobTitleValue = cleanString(payload.title ?? payload.jobTitle)
+        const tagsValue = cleanString(payload.tags)
+        const lastGiftValue = cleanString(payload.lastGift)
+        const notesValue = cleanString(payload.notes)
+        const biographyValue = cleanString(payload.biography)
+        const pictureUrlValue = cleanString(payload.pictureUrl)
+        let suggestedAskValue = null
+        if (payload.ask !== undefined && payload.ask !== null && payload.ask !== '') {
+            const numericAsk = Number(payload.ask)
+            if (Number.isFinite(numericAsk)) {
+                suggestedAskValue = numericAsk
+            }
+        }
+
         const result = stmt.run(
             ownerClientId,
             exclusiveDonor ? 1 : 0,
             exclusiveDonor ? exclusiveClientId : null,
-            name,
-            payload.firstName || null,
-            payload.lastName || null,
-            payload.phone || null,
-            payload.email || null,
+            resolvedName,
+            firstNameValue,
+            lastNameValue,
+            isBusiness ? 1 : 0,
+            businessName,
+            phoneValue,
+            emailValue,
             street,
             addressLine2,
             city,
             state,
             postal,
-            payload.company || null,
-            payload.industry || null,
-            payload.title || payload.jobTitle || null,
-            payload.tags || null,
-            payload.ask !== undefined && payload.ask !== null && payload.ask !== '' ? Number(payload.ask) : null,
-            payload.lastGift || null,
-            payload.notes || null,
-            payload.biography || null,
-            payload.pictureUrl || null
+            companyValue,
+            occupationValue,
+            jobTitleValue,
+            tagsValue,
+            suggestedAskValue,
+            lastGiftValue,
+            notesValue,
+            biographyValue,
+            pictureUrlValue
         )
 
         const donorId = result.lastInsertRowid
@@ -3376,14 +3463,64 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
             return res.status(404).json({ error: 'Donor not found' })
         }
 
-        const firstName = payload.firstName ?? existing.first_name
-        const lastName = payload.lastName ?? existing.last_name
-        const name = payload.name || `${firstName || ''} ${lastName || ''}`.trim() || existing.name
-        const suggestedAsk =
+        let firstName =
+            payload.firstName !== undefined ? cleanString(payload.firstName) : existing.first_name || null
+        let lastName =
+            payload.lastName !== undefined ? cleanString(payload.lastName) : existing.last_name || null
+
+        const rawName = payload.name !== undefined ? cleanString(payload.name) : undefined
+
+        const businessFlagInput =
+            payload.isBusiness ??
+            payload.businessEntity ??
+            payload.is_business ??
+            payload.business
+
+        const isBusiness = parseBooleanFlag(businessFlagInput, {
+            defaultValue: Boolean(existing.is_business),
+        })
+
+        const businessNameKeys = ['businessName', 'business_name', 'companyName', 'businessLabel']
+        let businessName = existing.business_name || null
+        for (const key of businessNameKeys) {
+            if (Object.prototype.hasOwnProperty.call(payload, key)) {
+                businessName = cleanString(payload[key])
+                break
+            }
+        }
+        if (isBusiness && !businessName) {
+            businessName = cleanString(payload.company) || businessName
+        }
+
+        let name = rawName !== undefined ? rawName : null
+        if (name === null) {
+            const combined = `${firstName || ''} ${lastName || ''}`.trim()
+            name = combined || existing.name || null
+        }
+
+        if (isBusiness) {
+            const resolvedBusinessName = businessName || name || existing.business_name || existing.name
+            if (!cleanString(resolvedBusinessName)) {
+                return res.status(400).json({ error: 'Business donors must include a business name' })
+            }
+            name = cleanString(resolvedBusinessName) || existing.name
+            businessName = name
+            firstName = null
+            lastName = null
+        } else {
+            businessName = null
+            if (!cleanString(name)) {
+                name = existing.name
+            }
+        }
+        let suggestedAskValue =
             payload.ask === null || payload.ask === undefined || payload.ask === ''
                 ? null
                 : Number(payload.ask)
-        const jobTitle = payload.title ?? payload.jobTitle ?? existing.job_title
+        const jobTitleInput =
+            payload.title !== undefined || payload.jobTitle !== undefined
+                ? cleanString(payload.title ?? payload.jobTitle)
+                : undefined
         const streetInput = payload.street ?? payload.streetAddress
         const addressLine2Input = payload.addressLine2
         const cityValue = payload.city === undefined ? existing.city : cleanString(payload.city)
@@ -3442,6 +3579,8 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
             SET name = ?,
                 first_name = ?,
                 last_name = ?,
+                is_business = ?,
+                business_name = ?,
                 phone = ?,
                 email = ?,
                 street_address = ?,
@@ -3464,26 +3603,53 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
         `)
 
         const runUpdate = db.transaction(() => {
+            const phoneValue =
+                payload.phone !== undefined ? cleanString(payload.phone) : existing.phone || null
+            const emailValue =
+                payload.email !== undefined ? cleanString(payload.email) : existing.email || null
+            const companyValue =
+                payload.company !== undefined ? cleanString(payload.company) : existing.employer || null
+            const occupationValue =
+                payload.industry !== undefined ? cleanString(payload.industry) : existing.occupation || null
+            const jobTitleValue =
+                jobTitleInput !== undefined ? jobTitleInput : existing.job_title || null
+            const tagsValue =
+                payload.tags !== undefined ? cleanString(payload.tags) : existing.tags || null
+            const lastGiftValue =
+                payload.lastGift !== undefined ? cleanString(payload.lastGift) : existing.last_gift_note || null
+            const notesValue =
+                payload.notes !== undefined ? cleanString(payload.notes) : existing.notes || null
+            const biographyValue =
+                payload.biography !== undefined ? cleanString(payload.biography) : existing.bio || null
+            const pictureUrlValue =
+                payload.pictureUrl !== undefined ? cleanString(payload.pictureUrl) : existing.photo_url || null
+
+            if (suggestedAskValue !== null && !Number.isFinite(suggestedAskValue)) {
+                suggestedAskValue = null
+            }
+
             stmt.run(
                 name,
                 firstName || null,
                 lastName || null,
-                payload.phone ?? existing.phone,
-                payload.email ?? existing.email,
+                isBusiness ? 1 : 0,
+                businessName,
+                phoneValue,
+                emailValue,
                 streetValue,
                 addressLine2Value,
                 cityValue,
                 stateValue,
                 postalValue,
-                payload.company ?? existing.employer,
-                payload.industry ?? existing.occupation,
-                jobTitle,
-                payload.tags ?? existing.tags,
-                suggestedAsk,
-                payload.lastGift ?? existing.last_gift_note,
-                payload.notes ?? existing.notes,
-                payload.biography ?? existing.bio,
-                payload.pictureUrl ?? existing.photo_url,
+                companyValue,
+                occupationValue,
+                jobTitleValue,
+                tagsValue,
+                suggestedAskValue,
+                lastGiftValue,
+                notesValue,
+                biographyValue,
+                pictureUrlValue,
                 exclusiveDonor ? 1 : 0,
                 exclusiveDonor ? resolvedExclusiveClientId : null,
                 donorId

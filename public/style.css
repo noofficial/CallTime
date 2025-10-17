@@ -600,6 +600,18 @@ textarea.input {
   gap: var(--space-8);
 }
 
+.form-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-weight: var(--font-weight-medium);
+}
+
+.form-checkbox input[type='checkbox'] {
+  width: 1rem;
+  height: 1rem;
+}
+
 .form-grid {
   display: grid;
   gap: var(--space-16);

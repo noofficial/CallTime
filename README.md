@@ -11,6 +11,8 @@ CSV exports, and log outcomes that remain private to the active campaign.
 - **Dedicated donor database** capture full profiles (contact, biography,
   company, industry, photo, and structured giving history) through the in-app
   editor—no spreadsheet required.
+- **Business donor support** flag records as organizations, capture their
+  official name, and filter searches to business entities when prospecting.
 - **Google Sheet ingestion** still accepts either the `gviz` JSON feed or the
   "Publish to web" CSV link from Sheets when you want to bulk-import records.
 - **Rich donor profiles** surface contact info, giving history, bios, and
@@ -73,6 +75,9 @@ header to review and edit the profiles attached to the selected campaign.
 - Add donors with the **New donor** button, then fill in identity, contact,
   professional, and biography fields. Suggested asks, last gift notes, and tags
   help you organize follow-up plans.
+- Toggle the **Business entity** selector to convert the editor to organization
+  mode. Business donors only require a company name, and the database search can
+  filter exclusively for business entities or match against the business name.
 - Record detailed giving history by entering an election year, candidate, and
   contribution amount. Each entry is grouped automatically by year, so you can
   scan a donor’s past activity at a glance during call time.
@@ -94,6 +99,10 @@ skipped automatically.
 - **Core donor fields:** `Name`, `First Name`, `Last Name`, `Email`, `Phone`,
   `City`, `Employer`, `Occupation`, `Suggested Ask`, `Last Gift`, `Tags`,
   `Notes`, and `Photo URL` map to the donor profile.
+- **Business entities:** add `Business Entity` (Yes/No) with an optional
+  `Business Name`. Rows flagged as businesses are stored as organization
+  records—even when the column is blank, the importer defaults to "No" so
+  individual donors behave as expected.
 - **Campaign assignment:** include `Client ID`, `Client`, or `Campaign` to assign
   donors to a specific workspace. Leave the column out (or select **No client**)
   to keep donors unassigned after import.

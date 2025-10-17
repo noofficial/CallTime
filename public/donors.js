@@ -44,6 +44,8 @@ const state = {
 const elements = {
   searchForm: document.getElementById("donor-search-form"),
   searchName: document.getElementById("donor-search-name"),
+  searchBusinessName: document.getElementById("donor-search-business-name"),
+  searchBusinessOnly: document.getElementById("donor-search-business-only"),
   searchCandidates: document.getElementById("donor-search-candidates"),
   searchMinAmount: document.getElementById("donor-search-min-amount"),
   searchMaxAmount: document.getElementById("donor-search-max-amount"),
@@ -208,6 +210,9 @@ function resetSearchFilters() {
   if (elements.searchForm instanceof HTMLFormElement) {
     elements.searchForm.reset();
   }
+  if (elements.searchBusinessOnly instanceof HTMLInputElement) {
+    elements.searchBusinessOnly.checked = false;
+  }
   if (elements.searchCandidates instanceof HTMLSelectElement) {
     Array.from(elements.searchCandidates.options).forEach((option) => {
       option.selected = false;
@@ -225,6 +230,10 @@ function collectSearchFilters() {
     : [];
   return {
     name: (elements.searchName?.value || "").trim(),
+    businessName: (elements.searchBusinessName?.value || "").trim(),
+    businessOnly: elements.searchBusinessOnly instanceof HTMLInputElement
+      ? elements.searchBusinessOnly.checked
+      : false,
     candidates,
     minAmount: (elements.searchMinAmount?.value || "").trim(),
     maxAmount: (elements.searchMaxAmount?.value || "").trim(),
@@ -237,6 +246,8 @@ function collectSearchFilters() {
 function getDefaultFilters() {
   return {
     name: "",
+    businessName: "",
+    businessOnly: false,
     candidates: [],
     minAmount: "",
     maxAmount: "",
@@ -252,6 +263,17 @@ function parseAmountInput(value) {
   if (!trimmed) return null;
   const numeric = Number.parseFloat(trimmed.replace(/[^0-9.\-]/g, ""));
   return Number.isFinite(numeric) ? numeric : null;
+}
+
+function parseBooleanInput(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return false;
+    return ["1", "true", "yes", "y", "on"].includes(normalized);
+  }
+  return false;
 }
 
 function buildGivingCandidates(donors = []) {
@@ -305,7 +327,13 @@ function normalizeDonorSummary(donor) {
   const id = donor.id != null ? String(donor.id) : "";
   const firstName = donor.first_name || "";
   const lastName = donor.last_name || "";
-  const name = donor.name || `${firstName} ${lastName}`.trim();
+  const isBusiness = parseBooleanInput(
+    donor.is_business ?? donor.isBusiness ?? donor.business_entity ?? donor.isBusinessEntity,
+  );
+  const rawBusinessName = donor.business_name || donor.businessName || "";
+  const fallbackName = `${firstName} ${lastName}`.trim();
+  const baseName = donor.name || fallbackName;
+  const displayName = isBusiness ? rawBusinessName || baseName : baseName;
   const askValue =
     donor.suggested_ask === null || donor.suggested_ask === undefined
       ? null
@@ -320,9 +348,11 @@ function normalizeDonorSummary(donor) {
   const givingCandidates = parseDelimitedList(donor.donated_candidates || donor.giving_candidates);
   return {
     id,
-    name: name || "New donor",
+    name: displayName || "New donor",
     firstName,
     lastName,
+    isBusiness,
+    businessName: (isBusiness ? rawBusinessName || baseName : rawBusinessName) || "",
     email: donor.email || "",
     phone: donor.phone || "",
     city: donor.city || "",
@@ -385,12 +415,19 @@ function buildAssignmentMap(donors) {
 }
 
 function sortDonors(list = []) {
-  return [...list].sort(
-    (a, b) =>
+  return [...list].sort((a, b) => {
+    if (a.isBusiness && b.isBusiness) {
+      return (a.businessName || a.name || "").localeCompare(b.businessName || b.name || "");
+    }
+    if (a.isBusiness !== b.isBusiness) {
+      return a.isBusiness ? 1 : -1;
+    }
+    return (
       (a.lastName || "").localeCompare(b.lastName || "") ||
       (a.firstName || "").localeCompare(b.firstName || "") ||
-      (a.name || "").localeCompare(b.name || ""),
-  );
+      (a.name || "").localeCompare(b.name || "")
+    );
+  });
 }
 
 function applyFilters() {
@@ -401,6 +438,8 @@ function applyFilters() {
   }
   const filters = state.filters || getDefaultFilters();
   const nameTerm = filters.name.toLowerCase();
+  const businessNameTerm = filters.businessName.toLowerCase();
+  const businessOnly = Boolean(filters.businessOnly);
   const cityTerm = filters.city.toLowerCase();
   const companyTerm = filters.company.toLowerCase();
   const tagsTerm = filters.tags.toLowerCase();
@@ -420,6 +459,18 @@ function applyFilters() {
         .join(" ")
         .toLowerCase();
       if (!nameHaystack.includes(nameTerm)) {
+        return false;
+      }
+    }
+    if (businessOnly && !donor.isBusiness) {
+      return false;
+    }
+    if (businessNameTerm) {
+      if (!donor.isBusiness) {
+        return false;
+      }
+      const businessHaystack = (donor.businessName || donor.name || "").toLowerCase();
+      if (!businessHaystack.includes(businessNameTerm)) {
         return false;
       }
     }
@@ -606,6 +657,9 @@ function renderSearchResults() {
     button.setAttribute("data-donor-id", donor.id);
 
     const metaLines = [];
+    if (donor.isBusiness) {
+      metaLines.push("Business entity");
+    }
     const assigned = state.assignments.get(donor.id) || new Set();
     const assignedCount = assigned.size;
     const focusLabel = assignedCount
@@ -722,6 +776,13 @@ function renderDonorDetail() {
   nameHeading.textContent = buildDraftDisplayName(draft.values, detail);
   identity.append(nameHeading);
 
+  if (detail.isBusiness) {
+    const badge = document.createElement("span");
+    badge.className = "status status--info";
+    badge.textContent = "Business entity";
+    identity.append(badge);
+  }
+
   const meta = document.createElement("p");
   meta.className = "muted";
   meta.setAttribute("data-donor-meta", "");
@@ -760,6 +821,8 @@ function renderDonorDetail() {
   form.append(createCandidateNotesSection(detail));
   form.append(createAssignmentSection(detail));
   form.append(createHistorySection(detail));
+
+  updateInlineBusinessRequirements(form, draft.values);
 
   profile.append(form);
   container.append(profile);
@@ -837,6 +900,8 @@ function createDraftFromDonor(donor) {
     values: {
       firstName: donor.firstName || "",
       lastName: donor.lastName || "",
+      isBusiness: donor.isBusiness ? "yes" : "no",
+      businessName: donor.businessName || "",
       email: donor.email || "",
       phone: donor.phone || "",
       street: donor.street || "",
@@ -864,6 +929,10 @@ function createDraftFromDonor(donor) {
 }
 
 function buildDraftDisplayName(values, donor) {
+  if (values.isBusiness === "yes") {
+    const businessName = (values.businessName || donor.businessName || donor.name || "").trim();
+    if (businessName) return businessName;
+  }
   const name = `${values.firstName || ""} ${values.lastName || ""}`.trim();
   if (name) return name;
   if (donor.name) return donor.name;
@@ -910,12 +979,26 @@ function createIdentitySection(draft) {
   const grid = document.createElement("div");
   grid.className = "form-grid";
   grid.append(
+    createSelectField("inline-is-business", "isBusiness", "Business entity", draft.values.isBusiness, [
+      { value: "no", label: "No" },
+      { value: "yes", label: "Yes" },
+    ]),
+    createInputField(
+      "inline-business-name",
+      "businessName",
+      "Business name",
+      draft.values.businessName,
+      {
+        required: draft.values.isBusiness === "yes",
+        autocomplete: "organization",
+      },
+    ),
     createInputField("inline-first-name", "firstName", "First name", draft.values.firstName, {
-      required: true,
+      required: draft.values.isBusiness !== "yes",
       autocomplete: "given-name",
     }),
     createInputField("inline-last-name", "lastName", "Last name", draft.values.lastName, {
-      required: true,
+      required: draft.values.isBusiness !== "yes",
       autocomplete: "family-name",
     }),
     createInputField("inline-email", "email", "Email", draft.values.email, {
@@ -1075,6 +1158,28 @@ function createCandidateNotesSection(donor) {
   return section;
 }
 
+function createSelectField(id, name, label, value, options = []) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "form-row";
+  const labelEl = document.createElement("label");
+  labelEl.className = "form-label";
+  labelEl.setAttribute("for", id);
+  labelEl.textContent = label;
+  const select = document.createElement("select");
+  select.className = "input select";
+  select.id = id;
+  select.name = name;
+  options.forEach((option) => {
+    const optionEl = document.createElement("option");
+    optionEl.value = option.value;
+    optionEl.textContent = option.label;
+    select.append(optionEl);
+  });
+  select.value = value || options?.[0]?.value || "";
+  wrapper.append(labelEl, select);
+  return wrapper;
+}
+
 function createInputField(id, name, label, value, options = {}) {
   const wrapper = document.createElement("div");
   wrapper.className = "form-row";
@@ -1115,6 +1220,23 @@ function createTextareaField(id, name, label, value, rows = 4) {
   return wrapper;
 }
 
+function updateInlineBusinessRequirements(form, values) {
+  if (!(form instanceof HTMLFormElement)) return;
+  const isBusiness = values?.isBusiness === "yes";
+  const firstNameInput = form.querySelector("input[name='firstName']");
+  const lastNameInput = form.querySelector("input[name='lastName']");
+  const businessNameInput = form.querySelector("input[name='businessName']");
+  if (firstNameInput) {
+    firstNameInput.required = !isBusiness;
+  }
+  if (lastNameInput) {
+    lastNameInput.required = !isBusiness;
+  }
+  if (businessNameInput) {
+    businessNameInput.required = isBusiness;
+  }
+}
+
 function handleInlineInput(event, donor, nameHeading, metaElement) {
   const target = event.target;
   if (
@@ -1132,6 +1254,15 @@ function handleInlineInput(event, donor, nameHeading, metaElement) {
   }
   if (!target.name) return;
   state.detailDraft.values[target.name] = target.value;
+  if (target.name === "isBusiness") {
+    if (event.currentTarget instanceof HTMLFormElement) {
+      updateInlineBusinessRequirements(event.currentTarget, state.detailDraft.values);
+    }
+    nameHeading.textContent = buildDraftDisplayName(state.detailDraft.values, donor);
+  }
+  if (target.name === "businessName") {
+    nameHeading.textContent = buildDraftDisplayName(state.detailDraft.values, donor);
+  }
   if (target.name === "firstName" || target.name === "lastName") {
     nameHeading.textContent = buildDraftDisplayName(state.detailDraft.values, donor);
   }
@@ -1157,6 +1288,8 @@ async function handleInlineSubmit(donor) {
   const payload = {
     firstName: values.firstName.trim(),
     lastName: values.lastName.trim(),
+    isBusiness: values.isBusiness === "yes",
+    businessName: values.businessName.trim(),
     email: values.email.trim(),
     phone: values.phone.trim(),
     street: values.street.trim(),
