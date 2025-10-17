@@ -51,6 +51,24 @@
                     />
                   </div>
                   <div class="form-row">
+                    <label class="form-label" for="donor-search-business-name">Business name</label>
+                    <input
+                      class="input"
+                      id="donor-search-business-name"
+                      name="businessName"
+                      type="search"
+                      placeholder="Search by business"
+                      autocomplete="organization"
+                    />
+                  </div>
+                  <div class="form-row">
+                    <label class="form-checkbox" for="donor-search-business-only">
+                      <input id="donor-search-business-only" name="businessOnly" type="checkbox" />
+                      <span>Business entities only</span>
+                    </label>
+                    <p class="muted form-help">Show only donors flagged as business entities.</p>
+                  </div>
+                  <div class="form-row">
                     <label class="form-label" for="donor-search-candidates">Candidates donated to</label>
                     <select
                       class="input select"
@@ -200,12 +218,23 @@
           <form id="donor-editor-form" class="donor-editor__form" novalidate>
             <section class="editor-section">
               <h2>Identity</h2>
-              <div class="editor-grid">
-                <div class="form-row">
-                  <label class="form-label" for="editor-first-name">First name</label>
-                  <input class="input" id="editor-first-name" name="firstName" autocomplete="given-name" required />
-                </div>
-                <div class="form-row">
+                <div class="editor-grid">
+                  <div class="form-row">
+                    <label class="form-label" for="editor-business-toggle">Business entity</label>
+                    <select class="input select" id="editor-business-toggle" name="isBusiness">
+                      <option value="no" selected>No</option>
+                      <option value="yes">Yes</option>
+                    </select>
+                  </div>
+                  <div class="form-row">
+                    <label class="form-label" for="editor-business-name">Business name</label>
+                    <input class="input" id="editor-business-name" name="businessName" autocomplete="organization" />
+                  </div>
+                  <div class="form-row">
+                    <label class="form-label" for="editor-first-name">First name</label>
+                    <input class="input" id="editor-first-name" name="firstName" autocomplete="given-name" required />
+                  </div>
+                  <div class="form-row">
                   <label class="form-label" for="editor-last-name">Last name</label>
                   <input class="input" id="editor-last-name" name="lastName" autocomplete="family-name" required />
                 </div>
