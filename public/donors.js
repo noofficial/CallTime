@@ -5,6 +5,32 @@ import {
 } from "./donor-editor.js";
 import { managerFetch, UnauthorizedError, getManagerToken, clearManagerSession } from "./auth.js";
 
+const DONOR_TYPE = {
+  INDIVIDUAL: "individual",
+  BUSINESS: "business",
+  CAMPAIGN: "campaign",
+};
+
+const ALL_DONOR_TYPES = [DONOR_TYPE.INDIVIDUAL, DONOR_TYPE.BUSINESS, DONOR_TYPE.CAMPAIGN];
+const DONOR_TYPE_ORDER = [...ALL_DONOR_TYPES];
+
+const ORGANIZATION_DONOR_TYPES = new Set([DONOR_TYPE.BUSINESS, DONOR_TYPE.CAMPAIGN]);
+
+const DONOR_TYPE_LABELS = {
+  [DONOR_TYPE.INDIVIDUAL]: "Individual",
+  [DONOR_TYPE.BUSINESS]: "Business",
+  [DONOR_TYPE.CAMPAIGN]: "Campaign / PAC",
+};
+const DONOR_TYPE_SECTION_LABELS = {
+  [DONOR_TYPE.INDIVIDUAL]: "Individuals",
+  [DONOR_TYPE.BUSINESS]: "Businesses",
+  [DONOR_TYPE.CAMPAIGN]: "Campaigns / PACs",
+};
+const DONOR_TYPE_POSITION = DONOR_TYPE_ORDER.reduce((acc, type, index) => {
+  acc[type] = index;
+  return acc;
+}, {});
+
 const state = {
   donors: [],
   filtered: [],
@@ -43,9 +69,9 @@ const state = {
 
 const elements = {
   searchForm: document.getElementById("donor-search-form"),
-  searchName: document.getElementById("donor-search-name"),
-  searchBusinessName: document.getElementById("donor-search-business-name"),
-  searchBusinessOnly: document.getElementById("donor-search-business-only"),
+  searchTypeContainer: document.getElementById("donor-search-types"),
+  searchIndividualName: document.getElementById("donor-search-individual-name"),
+  searchOrganizationName: document.getElementById("donor-search-organization-name"),
   searchCandidates: document.getElementById("donor-search-candidates"),
   searchMinAmount: document.getElementById("donor-search-min-amount"),
   searchMaxAmount: document.getElementById("donor-search-max-amount"),
@@ -127,6 +153,9 @@ function bindEvents() {
   elements.searchForm?.addEventListener("submit", (event) => {
     event.preventDefault();
     executeSearch();
+  });
+  getTypeFilterInputs().forEach((input) => {
+    input.addEventListener("change", handleTypeFilterChange);
   });
   elements.searchReset?.addEventListener("click", (event) => {
     event.preventDefault();
@@ -210,9 +239,9 @@ function resetSearchFilters() {
   if (elements.searchForm instanceof HTMLFormElement) {
     elements.searchForm.reset();
   }
-  if (elements.searchBusinessOnly instanceof HTMLInputElement) {
-    elements.searchBusinessOnly.checked = false;
-  }
+  getTypeFilterInputs().forEach((input) => {
+    input.checked = true;
+  });
   if (elements.searchCandidates instanceof HTMLSelectElement) {
     Array.from(elements.searchCandidates.options).forEach((option) => {
       option.selected = false;
@@ -222,18 +251,39 @@ function resetSearchFilters() {
   applyFilters();
 }
 
+function getTypeFilterInputs() {
+  if (!elements.searchTypeContainer) {
+    return [];
+  }
+  return Array.from(
+    elements.searchTypeContainer.querySelectorAll("input[name='donorType']") || [],
+  );
+}
+
+function handleTypeFilterChange() {
+  const inputs = getTypeFilterInputs();
+  if (!inputs.length) return;
+  if (!inputs.some((input) => input.checked)) {
+    inputs.forEach((input) => {
+      input.checked = true;
+    });
+  }
+}
+
 function collectSearchFilters() {
   const candidates = elements.searchCandidates instanceof HTMLSelectElement
     ? Array.from(elements.searchCandidates.selectedOptions)
         .map((option) => option.value)
         .filter(Boolean)
     : [];
+  const typeInputs = getTypeFilterInputs();
+  const selectedTypes = typeInputs.length
+    ? typeInputs.filter((input) => input.checked).map((input) => input.value)
+    : [];
   return {
-    name: (elements.searchName?.value || "").trim(),
-    businessName: (elements.searchBusinessName?.value || "").trim(),
-    businessOnly: elements.searchBusinessOnly instanceof HTMLInputElement
-      ? elements.searchBusinessOnly.checked
-      : false,
+    individualName: (elements.searchIndividualName?.value || "").trim(),
+    organizationName: (elements.searchOrganizationName?.value || "").trim(),
+    types: selectedTypes.length ? selectedTypes : [...ALL_DONOR_TYPES],
     candidates,
     minAmount: (elements.searchMinAmount?.value || "").trim(),
     maxAmount: (elements.searchMaxAmount?.value || "").trim(),
@@ -245,9 +295,9 @@ function collectSearchFilters() {
 
 function getDefaultFilters() {
   return {
-    name: "",
-    businessName: "",
-    businessOnly: false,
+    individualName: "",
+    organizationName: "",
+    types: [...ALL_DONOR_TYPES],
     candidates: [],
     minAmount: "",
     maxAmount: "",
@@ -322,18 +372,46 @@ function normalizeClient(client) {
   };
 }
 
+function resolveDonorTypeFromRecord(donor) {
+  const rawType = (donor.donor_type || donor.donorType || donor.category || donor.entity_type || "")
+    .toString()
+    .trim()
+    .toLowerCase();
+  if (ALL_DONOR_TYPES.includes(rawType)) {
+    return rawType;
+  }
+  if (/campaign|committee|pac/.test(rawType)) {
+    return DONOR_TYPE.CAMPAIGN;
+  }
+  if (/business|company|organisation|organization|corp/.test(rawType)) {
+    return DONOR_TYPE.BUSINESS;
+  }
+  const isBusinessFlag = parseBooleanInput(
+    donor.is_business ?? donor.isBusiness ?? donor.business_entity ?? donor.isBusinessEntity,
+  );
+  if (isBusinessFlag) {
+    return DONOR_TYPE.BUSINESS;
+  }
+  const organizationName =
+    donor.business_name || donor.businessName || donor.organization_name || donor.organizationName || "";
+  if (organizationName && !((donor.first_name || "").trim() || (donor.last_name || "").trim())) {
+    return DONOR_TYPE.BUSINESS;
+  }
+  return DONOR_TYPE.INDIVIDUAL;
+}
+
 function normalizeDonorSummary(donor) {
   if (!donor) return null;
   const id = donor.id != null ? String(donor.id) : "";
   const firstName = donor.first_name || "";
   const lastName = donor.last_name || "";
-  const isBusiness = parseBooleanInput(
-    donor.is_business ?? donor.isBusiness ?? donor.business_entity ?? donor.isBusinessEntity,
-  );
-  const rawBusinessName = donor.business_name || donor.businessName || "";
+  const donorType = resolveDonorTypeFromRecord(donor);
+  const isOrganization = ORGANIZATION_DONOR_TYPES.has(donorType);
+  const rawOrganizationName =
+    donor.business_name || donor.businessName || donor.organization_name || donor.organizationName || "";
   const fallbackName = `${firstName} ${lastName}`.trim();
-  const baseName = donor.name || fallbackName;
-  const displayName = isBusiness ? rawBusinessName || baseName : baseName;
+  const baseName = donor.name || fallbackName || rawOrganizationName;
+  const displayName = isOrganization ? rawOrganizationName || baseName : baseName;
   const askValue =
     donor.suggested_ask === null || donor.suggested_ask === undefined
       ? null
@@ -351,8 +429,11 @@ function normalizeDonorSummary(donor) {
     name: displayName || "New donor",
     firstName,
     lastName,
-    isBusiness,
-    businessName: (isBusiness ? rawBusinessName || baseName : rawBusinessName) || "",
+    type: donorType,
+    typeLabel: DONOR_TYPE_LABELS[donorType] || "Donor",
+    isBusiness: isOrganization,
+    organizationName: rawOrganizationName || "",
+    businessName: rawOrganizationName || "",
     email: donor.email || "",
     phone: donor.phone || "",
     city: donor.city || "",
@@ -416,11 +497,13 @@ function buildAssignmentMap(donors) {
 
 function sortDonors(list = []) {
   return [...list].sort((a, b) => {
-    if (a.isBusiness && b.isBusiness) {
-      return (a.businessName || a.name || "").localeCompare(b.businessName || b.name || "");
+    const orderA = DONOR_TYPE_POSITION[a.type] ?? 99;
+    const orderB = DONOR_TYPE_POSITION[b.type] ?? 99;
+    if (orderA !== orderB) {
+      return orderA - orderB;
     }
-    if (a.isBusiness !== b.isBusiness) {
-      return a.isBusiness ? 1 : -1;
+    if (ORGANIZATION_DONOR_TYPES.has(a.type) && ORGANIZATION_DONOR_TYPES.has(b.type)) {
+      return (a.organizationName || a.name || "").localeCompare(b.organizationName || b.name || "");
     }
     return (
       (a.lastName || "").localeCompare(b.lastName || "") ||
@@ -437,9 +520,12 @@ function applyFilters() {
     return;
   }
   const filters = state.filters || getDefaultFilters();
-  const nameTerm = filters.name.toLowerCase();
-  const businessNameTerm = filters.businessName.toLowerCase();
-  const businessOnly = Boolean(filters.businessOnly);
+  const typeSelection = Array.isArray(filters.types) && filters.types.length
+    ? filters.types
+    : [...ALL_DONOR_TYPES];
+  const typeSet = new Set(typeSelection.map((type) => String(type).toLowerCase()));
+  const individualNameTerm = (filters.individualName || "").toLowerCase();
+  const organizationNameTerm = (filters.organizationName || "").toLowerCase();
   const cityTerm = filters.city.toLowerCase();
   const companyTerm = filters.company.toLowerCase();
   const tagsTerm = filters.tags.toLowerCase();
@@ -453,12 +539,27 @@ function applyFilters() {
 
   state.filtered = state.donors.filter((donor) => {
     if (!donor) return false;
-    if (nameTerm) {
+    if (!typeSet.has(donor.type)) {
+      return false;
+    }
+    if (individualNameTerm) {
+      if (donor.type !== DONOR_TYPE.INDIVIDUAL) {
+        return false;
+      }
       const nameHaystack = [donor.name, donor.firstName, donor.lastName]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
-      if (!nameHaystack.includes(nameTerm)) {
+      if (!nameHaystack.includes(individualNameTerm)) {
+        return false;
+      }
+    }
+    if (organizationNameTerm) {
+      if (!ORGANIZATION_DONOR_TYPES.has(donor.type)) {
+        return false;
+      }
+      const organizationHaystack = (donor.organizationName || donor.name || "").toLowerCase();
+      if (!organizationHaystack.includes(organizationNameTerm)) {
         return false;
       }
     }
@@ -644,50 +745,21 @@ function renderSearchResults() {
   empty.classList.add("hidden");
   list.classList.remove("hidden");
 
-  state.filtered.forEach((donor) => {
-    const item = document.createElement("li");
-    item.className = "database-list__item";
-    if (donor.id === state.selectedDonorId) {
-      item.classList.add("database-list__item--active");
+  const groups = buildDonorTypeGroups(state.filtered);
+  const selectedTypes = Array.isArray(state.filters?.types) && state.filters.types.length
+    ? state.filters.types
+    : [...ALL_DONOR_TYPES];
+  const shouldGroupByType = groups.length > 1 || selectedTypes.length > 1;
+
+  groups.forEach((group, index) => {
+    if (shouldGroupByType) {
+      const heading = createTypeSectionHeading(group.type, group.donors.length, index === 0);
+      list.append(heading);
     }
-
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "database-list__button";
-    button.setAttribute("data-donor-id", donor.id);
-
-    const metaLines = [];
-    if (donor.isBusiness) {
-      metaLines.push("Business entity");
-    }
-    const assigned = state.assignments.get(donor.id) || new Set();
-    const assignedCount = assigned.size;
-    const focusLabel = assignedCount
-      ? `${assignedCount} focus ${assignedCount === 1 ? "list" : "lists"}`
-      : "Not assigned";
-    const totalLabel = donor.totalContributed > 0
-      ? `$${formatCurrency(donor.totalContributed)} recorded`
-      : "No giving history";
-    metaLines.push(`${totalLabel} • ${focusLabel}`);
-
-    const location = buildLocationLabel(donor.city, donor.state, donor.postalCode);
-    const professionalParts = [location, donor.company, donor.title].filter(Boolean);
-    if (professionalParts.length) {
-      metaLines.push(professionalParts.join(" • "));
-    }
-
-    const candidateSummary = formatCandidateSummary(donor.givingCandidates);
-    if (candidateSummary) {
-      metaLines.push(`Donated to: ${candidateSummary}`);
-    }
-
-    button.innerHTML = [
-      `<span class="database-list__title">${escapeHtml(donor.name || "New donor")}</span>`,
-      ...metaLines.map((line) => `<span class="database-list__meta">${escapeHtml(line)}</span>`),
-    ].join("");
-
-    item.append(button);
-    list.append(item);
+    group.donors.forEach((donor) => {
+      const item = createDonorListItem(donor);
+      list.append(item);
+    });
   });
 
   if (!state.selectedDonorId && elements.detailEmpty) {
@@ -695,6 +767,95 @@ function renderSearchResults() {
     elements.detailEmpty.removeAttribute("aria-hidden");
     elements.detailEmpty.removeAttribute("hidden");
   }
+}
+
+function buildDonorTypeGroups(donors) {
+  const grouped = new Map();
+  donors.forEach((donor) => {
+    if (!donor) return;
+    const type = DONOR_TYPE_ORDER.includes(donor.type) ? donor.type : DONOR_TYPE.INDIVIDUAL;
+    if (!grouped.has(type)) {
+      grouped.set(type, []);
+    }
+    grouped.get(type).push(donor);
+  });
+  return DONOR_TYPE_ORDER.filter((type) => grouped.has(type)).map((type) => ({
+    type,
+    donors: grouped.get(type) || [],
+  }));
+}
+
+function createTypeSectionHeading(type, count, isFirstSection) {
+  const item = document.createElement("li");
+  item.className = "database-list__section";
+  item.setAttribute("data-donor-type-section", type);
+  if (isFirstSection) {
+    item.classList.add("database-list__section--first");
+  }
+  const label = document.createElement("span");
+  label.className = "database-list__section-label";
+  label.textContent = DONOR_TYPE_SECTION_LABELS[type] || DONOR_TYPE_LABELS[type] || "Donors";
+  label.setAttribute("role", "heading");
+  label.setAttribute("aria-level", "3");
+  const countLabel = document.createElement("span");
+  countLabel.className = "database-list__section-count";
+  countLabel.textContent = formatDonorCount(count);
+  item.append(label, countLabel);
+  return item;
+}
+
+function createDonorListItem(donor) {
+  const item = document.createElement("li");
+  item.className = "database-list__item";
+  if (donor.id === state.selectedDonorId) {
+    item.classList.add("database-list__item--active");
+  }
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "database-list__button";
+  button.setAttribute("data-donor-id", donor.id);
+
+  const metaLines = [];
+  if (donor.typeLabel) {
+    metaLines.push(donor.typeLabel);
+  }
+  const assigned = state.assignments.get(donor.id) || new Set();
+  const assignedCount = assigned.size;
+  const focusLabel = assignedCount
+    ? `${assignedCount} focus ${assignedCount === 1 ? "list" : "lists"}`
+    : "Not assigned";
+  const totalLabel = donor.totalContributed > 0
+    ? `$${formatCurrency(donor.totalContributed)} recorded`
+    : "No giving history";
+  metaLines.push(`${totalLabel} • ${focusLabel}`);
+
+  const location = buildLocationLabel(donor.city, donor.state, donor.postalCode);
+  const professionalParts = [location, donor.company, donor.title].filter(Boolean);
+  if (professionalParts.length) {
+    metaLines.push(professionalParts.join(" • "));
+  }
+
+  const candidateSummary = formatCandidateSummary(donor.givingCandidates);
+  if (candidateSummary) {
+    metaLines.push(`Donated to: ${candidateSummary}`);
+  }
+
+  button.innerHTML = [
+    `<span class="database-list__title">${escapeHtml(donor.name || "New donor")}</span>`,
+    ...metaLines.map((line) => `<span class="database-list__meta">${escapeHtml(line)}</span>`),
+  ].join("");
+
+  item.append(button);
+  return item;
+}
+
+function formatDonorCount(count) {
+  const safeCount = Number.isFinite(count) ? count : 0;
+  if (safeCount === 1) {
+    return "1 donor";
+  }
+  return `${safeCount} donors`;
 }
 
 function setResultsEmptyState(title, message) {
@@ -776,10 +937,10 @@ function renderDonorDetail() {
   nameHeading.textContent = buildDraftDisplayName(draft.values, detail);
   identity.append(nameHeading);
 
-  if (detail.isBusiness) {
+  if (detail.typeLabel) {
     const badge = document.createElement("span");
     badge.className = "status status--info";
-    badge.textContent = "Business entity";
+    badge.textContent = detail.typeLabel;
     identity.append(badge);
   }
 
@@ -822,7 +983,7 @@ function renderDonorDetail() {
   form.append(createAssignmentSection(detail));
   form.append(createHistorySection(detail));
 
-  updateInlineBusinessRequirements(form, draft.values);
+  updateInlineIdentityRequirements(form, draft.values);
 
   profile.append(form);
   container.append(profile);
@@ -900,8 +1061,8 @@ function createDraftFromDonor(donor) {
     values: {
       firstName: donor.firstName || "",
       lastName: donor.lastName || "",
-      isBusiness: donor.isBusiness ? "yes" : "no",
-      businessName: donor.businessName || "",
+      donorType: ALL_DONOR_TYPES.includes(donor.type) ? donor.type : DONOR_TYPE.INDIVIDUAL,
+      organizationName: donor.organizationName || "",
       email: donor.email || "",
       phone: donor.phone || "",
       street: donor.street || "",
@@ -929,13 +1090,17 @@ function createDraftFromDonor(donor) {
 }
 
 function buildDraftDisplayName(values, donor) {
-  if (values.isBusiness === "yes") {
-    const businessName = (values.businessName || donor.businessName || donor.name || "").trim();
-    if (businessName) return businessName;
+  const donorType = values.donorType && ALL_DONOR_TYPES.includes(values.donorType)
+    ? values.donorType
+    : donor.type || DONOR_TYPE.INDIVIDUAL;
+  if (ORGANIZATION_DONOR_TYPES.has(donorType)) {
+    const organizationName = (values.organizationName || donor.organizationName || donor.name || "").trim();
+    if (organizationName) return organizationName;
   }
   const name = `${values.firstName || ""} ${values.lastName || ""}`.trim();
   if (name) return name;
   if (donor.name) return donor.name;
+  if (donor.organizationName) return donor.organizationName;
   if (values.email) return values.email;
   return "New donor";
 }
@@ -978,27 +1143,32 @@ function createIdentitySection(draft) {
 
   const grid = document.createElement("div");
   grid.className = "form-grid";
+  const donorTypeValue = ALL_DONOR_TYPES.includes(draft.values.donorType)
+    ? draft.values.donorType
+    : DONOR_TYPE.INDIVIDUAL;
+  const organizationRequired = ORGANIZATION_DONOR_TYPES.has(donorTypeValue);
   grid.append(
-    createSelectField("inline-is-business", "isBusiness", "Business entity", draft.values.isBusiness, [
-      { value: "no", label: "No" },
-      { value: "yes", label: "Yes" },
+    createSelectField("inline-donor-type", "donorType", "Donor type", donorTypeValue, [
+      { value: DONOR_TYPE.INDIVIDUAL, label: "Individual" },
+      { value: DONOR_TYPE.BUSINESS, label: "Business / Organization" },
+      { value: DONOR_TYPE.CAMPAIGN, label: "Campaign / PAC" },
     ]),
     createInputField(
-      "inline-business-name",
-      "businessName",
-      "Business name",
-      draft.values.businessName,
+      "inline-organization-name",
+      "organizationName",
+      "Organization name",
+      draft.values.organizationName,
       {
-        required: draft.values.isBusiness === "yes",
+        required: organizationRequired,
         autocomplete: "organization",
       },
     ),
     createInputField("inline-first-name", "firstName", "First name", draft.values.firstName, {
-      required: draft.values.isBusiness !== "yes",
+      required: !organizationRequired,
       autocomplete: "given-name",
     }),
     createInputField("inline-last-name", "lastName", "Last name", draft.values.lastName, {
-      required: draft.values.isBusiness !== "yes",
+      required: !organizationRequired,
       autocomplete: "family-name",
     }),
     createInputField("inline-email", "email", "Email", draft.values.email, {
@@ -1220,20 +1390,23 @@ function createTextareaField(id, name, label, value, rows = 4) {
   return wrapper;
 }
 
-function updateInlineBusinessRequirements(form, values) {
+function updateInlineIdentityRequirements(form, values) {
   if (!(form instanceof HTMLFormElement)) return;
-  const isBusiness = values?.isBusiness === "yes";
+  const donorType = values?.donorType && ALL_DONOR_TYPES.includes(values.donorType)
+    ? values.donorType
+    : DONOR_TYPE.INDIVIDUAL;
+  const isOrganization = ORGANIZATION_DONOR_TYPES.has(donorType);
   const firstNameInput = form.querySelector("input[name='firstName']");
   const lastNameInput = form.querySelector("input[name='lastName']");
-  const businessNameInput = form.querySelector("input[name='businessName']");
+  const organizationInput = form.querySelector("input[name='organizationName']");
   if (firstNameInput) {
-    firstNameInput.required = !isBusiness;
+    firstNameInput.required = !isOrganization;
   }
   if (lastNameInput) {
-    lastNameInput.required = !isBusiness;
+    lastNameInput.required = !isOrganization;
   }
-  if (businessNameInput) {
-    businessNameInput.required = isBusiness;
+  if (organizationInput) {
+    organizationInput.required = isOrganization;
   }
 }
 
@@ -1254,13 +1427,13 @@ function handleInlineInput(event, donor, nameHeading, metaElement) {
   }
   if (!target.name) return;
   state.detailDraft.values[target.name] = target.value;
-  if (target.name === "isBusiness") {
+  if (target.name === "donorType") {
     if (event.currentTarget instanceof HTMLFormElement) {
-      updateInlineBusinessRequirements(event.currentTarget, state.detailDraft.values);
+      updateInlineIdentityRequirements(event.currentTarget, state.detailDraft.values);
     }
     nameHeading.textContent = buildDraftDisplayName(state.detailDraft.values, donor);
   }
-  if (target.name === "businessName") {
+  if (target.name === "organizationName") {
     nameHeading.textContent = buildDraftDisplayName(state.detailDraft.values, donor);
   }
   if (target.name === "firstName" || target.name === "lastName") {
@@ -1285,11 +1458,16 @@ async function handleInlineSubmit(donor) {
     return;
   }
   const values = state.detailDraft.values;
+  const donorType = ALL_DONOR_TYPES.includes(values.donorType) ? values.donorType : DONOR_TYPE.INDIVIDUAL;
+  const organizationName = values.organizationName.trim();
+  const isOrganization = ORGANIZATION_DONOR_TYPES.has(donorType);
   const payload = {
     firstName: values.firstName.trim(),
     lastName: values.lastName.trim(),
-    isBusiness: values.isBusiness === "yes",
-    businessName: values.businessName.trim(),
+    donorType,
+    organizationName,
+    isBusiness: isOrganization,
+    businessName: isOrganization ? organizationName : "",
     email: values.email.trim(),
     phone: values.phone.trim(),
     street: values.street.trim(),

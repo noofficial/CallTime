@@ -61,6 +61,72 @@ const upload = multer({
 
 const BULK_UPLOAD_ACTOR = 'bulk-import'
 
+const DONOR_TYPE_VALUES = ['individual', 'business', 'campaign']
+const ORGANIZATION_DONOR_TYPES = new Set(['business', 'campaign'])
+const DONOR_TYPE_ALIASES = new Map([
+    ['individual', 'individual'],
+    ['person', 'individual'],
+    ['people', 'individual'],
+    ['supporter', 'individual'],
+    ['household', 'individual'],
+    ['business', 'business'],
+    ['company', 'business'],
+    ['corporation', 'business'],
+    ['organization', 'business'],
+    ['organisation', 'business'],
+    ['employer', 'business'],
+    ['firm', 'business'],
+    ['campaign', 'campaign'],
+    ['committee', 'campaign'],
+    ['politicalcommittee', 'campaign'],
+    ['politicalactioncommittee', 'campaign'],
+    ['campaignpac', 'campaign'],
+    ['pac', 'campaign'],
+    ['superpac', 'campaign'],
+    ['candidatecommittee', 'campaign'],
+])
+
+const resolveDonorType = (value, { defaultValue = 'individual', isBusinessFlag, businessName } = {}) => {
+    const normalized = normalizeDonorTypeValue(value)
+    if (normalized) {
+        return normalized
+    }
+
+    if (isBusinessFlag === true) {
+        return 'business'
+    }
+    if (isBusinessFlag === false) {
+        return 'individual'
+    }
+
+    if (businessName && !value) {
+        return 'business'
+    }
+
+    return defaultValue
+}
+
+const normalizeDonorTypeValue = (value) => {
+    if (value === undefined || value === null) {
+        return null
+    }
+
+    const normalized = normalizeColumnName(value)
+    if (!normalized) {
+        return null
+    }
+
+    if (DONOR_TYPE_ALIASES.has(normalized)) {
+        return DONOR_TYPE_ALIASES.get(normalized)
+    }
+
+    if (DONOR_TYPE_VALUES.includes(normalized)) {
+        return normalized
+    }
+
+    return null
+}
+
 const normalizeColumnName = (value) => {
     if (value === undefined || value === null) return ''
     return String(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, '')
@@ -70,19 +136,28 @@ const DONOR_COLUMN_MAP = new Map([
     ['name', 'name'],
     ['fullname', 'name'],
     ['donorname', 'name'],
+    ['contactname', 'name'],
+    ['primarycontactname', 'name'],
     ['firstname', 'first_name'],
     ['givenname', 'first_name'],
     ['preferredname', 'first_name'],
+    ['contactfirstname', 'first_name'],
+    ['primarycontactfirstname', 'first_name'],
     ['lastname', 'last_name'],
     ['surname', 'last_name'],
     ['last', 'last_name'],
+    ['contactlastname', 'last_name'],
+    ['primarycontactlastname', 'last_name'],
     ['phone', 'phone'],
     ['phonenumber', 'phone'],
     ['phone1', 'phone'],
     ['mobile', 'phone'],
     ['cell', 'phone'],
+    ['contactphone', 'phone'],
     ['email', 'email'],
     ['emailaddress', 'email'],
+    ['contactemail', 'email'],
+    ['primarycontactemail', 'email'],
     ['street', 'street_address'],
     ['address', 'street_address'],
     ['address1', 'street_address'],
@@ -118,6 +193,22 @@ const DONOR_COLUMN_MAP = new Map([
     ['profession', 'job_title'],
     ['industry', 'occupation'],
     ['sector', 'occupation'],
+    ['organizationname', 'business_name'],
+    ['organisationname', 'business_name'],
+    ['businessname', 'business_name'],
+    ['companyname', 'business_name'],
+    ['campaignname', 'business_name'],
+    ['committee', 'business_name'],
+    ['committee name', 'business_name'],
+    ['pacname', 'business_name'],
+    ['entityname', 'business_name'],
+    ['organizationlegalname', 'business_name'],
+    ['legalname', 'business_name'],
+    ['donortype', 'donor_type'],
+    ['entitytype', 'donor_type'],
+    ['category', 'donor_type'],
+    ['donorcategory', 'donor_type'],
+    ['type', 'donor_type'],
     ['title', 'job_title'],
     ['jobtitle', 'job_title'],
     ['position', 'job_title'],
@@ -576,22 +667,32 @@ const transformDonorRow = (row, fallbackClientId, clientLookup) => {
     let firstName = cleanString(row.first_name)
     let lastName = cleanString(row.last_name)
     let name = cleanString(row.name)
-    const isBusiness = parseBooleanFlag(row.is_business, { defaultValue: false })
+    const legacyBusinessFlag = parseBooleanFlag(row.is_business, { defaultValue: false })
     let businessName = cleanString(row.business_name)
+    const donorTypeInput = row.donor_type ?? row.donorType
+    let donorType = resolveDonorType(donorTypeInput, {
+        defaultValue: legacyBusinessFlag ? 'business' : 'individual',
+        isBusinessFlag: legacyBusinessFlag,
+        businessName,
+    })
 
-    if (isBusiness) {
+    const isOrganizationDonor = ORGANIZATION_DONOR_TYPES.has(donorType)
+
+    if (isOrganizationDonor) {
         if (!businessName) {
             businessName = cleanString(row.employer) || name
         }
 
         if (!businessName) {
-            return { error: 'Missing business name' }
+            const errorLabel = donorType === 'campaign' ? 'campaign or PAC name' : 'business or organization name'
+            return { error: `Missing ${errorLabel}` }
         }
 
         name = businessName
         firstName = null
         lastName = null
     } else {
+        donorType = 'individual'
         if (!name) {
             const combined = [firstName, lastName].filter(Boolean).join(' ').trim()
             name = combined || null
@@ -613,6 +714,8 @@ const transformDonorRow = (row, fallbackClientId, clientLookup) => {
 
         businessName = null
     }
+
+    const isBusiness = isOrganizationDonor
 
     const explicitClientProvided = hasValue(row.client_id) || hasValue(row.client_label)
     const resolvedClientId = resolveClientIdFromInputs(
@@ -637,6 +740,7 @@ const transformDonorRow = (row, fallbackClientId, clientLookup) => {
         last_name: lastName,
         is_business: isBusiness ? 1 : 0,
         business_name: isBusiness ? businessName : null,
+        donor_type: donorType,
         phone: cleanString(row.phone),
         email: cleanString(row.email),
         street_address: address.street_address,
@@ -928,6 +1032,7 @@ const DONORS_TABLE_COLUMNS_SQL = `
     last_name TEXT,
     is_business INTEGER DEFAULT 0,
     business_name TEXT,
+    donor_type TEXT DEFAULT 'individual',
     phone TEXT,
     email TEXT,
     street_address TEXT,
@@ -1030,6 +1135,7 @@ const DONORS_COLUMN_ORDER = [
     'last_name',
     'is_business',
     'business_name',
+    'donor_type',
     'phone',
     'email',
     'street_address',
@@ -1770,6 +1876,28 @@ const ensureColumn = (table, column, definition) => {
     }
 }
 
+const backfillDonorTypes = () => {
+    if (!tableHasColumn('donors', 'donor_type')) {
+        return
+    }
+
+    try {
+        db.exec(`
+            UPDATE donors
+            SET donor_type = 'business'
+            WHERE (donor_type IS NULL OR TRIM(donor_type) = '')
+              AND is_business = 1
+        `)
+        db.exec(`
+            UPDATE donors
+            SET donor_type = 'individual'
+            WHERE donor_type IS NULL OR TRIM(donor_type) = ''
+        `)
+    } catch (error) {
+        console.warn('Unable to backfill donor types:', error.message)
+    }
+}
+
 const enhanceSchema = () => {
     try {
         // Add new tables for enhanced functionality
@@ -1869,6 +1997,8 @@ ${DONORS_TABLE_COLUMNS_SQL}
         ensureColumn('donors', 'address_line2', 'address_line2 TEXT')
         ensureColumn('donors', 'state', 'state TEXT')
         ensureColumn('donors', 'postal_code', 'postal_code TEXT')
+        ensureColumn('donors', 'donor_type', "donor_type TEXT DEFAULT 'individual'")
+        backfillDonorTypes()
         ensureColumn('donors', 'notes', 'notes TEXT')
         ensureColumn('clients', 'candidate', 'candidate TEXT')
         ensureColumn('clients', 'office', 'office TEXT')
@@ -2313,12 +2443,12 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
 
         const insertStmt = db.prepare(`
             INSERT INTO donors (
-                client_id, name, first_name, last_name, is_business, business_name, phone, email,
+                client_id, name, first_name, last_name, is_business, business_name, donor_type, phone, email,
                 street_address, address_line2, city, state, postal_code,
                 employer, occupation, job_title, tags, suggested_ask, last_gift_note,
                 notes, bio, photo_url
             ) VALUES (
-                @client_id, @name, @first_name, @last_name, @is_business, @business_name, @phone, @email,
+                @client_id, @name, @first_name, @last_name, @is_business, @business_name, @donor_type, @phone, @email,
                 @street_address, @address_line2, @city, @state, @postal_code,
                 @employer, @occupation, @job_title, @tags, @suggested_ask, @last_gift_note,
                 @notes, @bio, @photo_url
@@ -2333,6 +2463,7 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
                 last_name = COALESCE(@last_name, last_name),
                 is_business = COALESCE(@is_business, is_business),
                 business_name = COALESCE(@business_name, business_name),
+                donor_type = COALESCE(@donor_type, donor_type),
                 phone = COALESCE(@phone, phone),
                 email = COALESCE(@email, email),
                 street_address = COALESCE(@street_address, street_address),
@@ -3308,7 +3439,7 @@ app.post('/api/donors', authenticateManager, (req, res) => {
         payload.businessEntity ??
         payload.is_business ??
         payload.business
-    let isBusiness = parseBooleanFlag(businessFlagInput, { defaultValue: false })
+    const legacyBusiness = parseBooleanFlag(businessFlagInput, { defaultValue: false })
     let businessName = cleanString(
         payload.businessName ??
             payload.business_name ??
@@ -3316,8 +3447,21 @@ app.post('/api/donors', authenticateManager, (req, res) => {
             payload.businessLabel ??
             null
     )
+    const donorTypeInput =
+        payload.donorType ??
+        payload.donor_type ??
+        payload.donorCategory ??
+        payload.category ??
+        payload.entityType
+    let donorType = resolveDonorType(donorTypeInput, {
+        defaultValue: legacyBusiness ? 'business' : 'individual',
+        isBusinessFlag: legacyBusiness,
+        businessName,
+    })
+
+    const isBusiness = ORGANIZATION_DONOR_TYPES.has(donorType)
     if (isBusiness && !businessName) {
-        businessName = cleanString(payload.company)
+        businessName = cleanString(payload.company) || cleanString(providedName)
     }
 
     let resolvedName = providedName || `${firstNameValue || ''} ${lastNameValue || ''}`.trim()
@@ -3325,12 +3469,16 @@ app.post('/api/donors', authenticateManager, (req, res) => {
     if (isBusiness) {
         resolvedName = businessName || resolvedName
         if (!cleanString(resolvedName)) {
-            return res.status(400).json({ error: 'Business donors must include a business name' })
+            const message = donorType === 'campaign'
+                ? 'Campaign and PAC donors must include an organization name'
+                : 'Business donors must include a business or organization name'
+            return res.status(400).json({ error: message })
         }
         businessName = cleanString(resolvedName)
         firstNameValue = null
         lastNameValue = null
     } else {
+        donorType = 'individual'
         businessName = null
     }
 
@@ -3343,14 +3491,14 @@ app.post('/api/donors', authenticateManager, (req, res) => {
         const stmt = db.prepare(`
             INSERT INTO donors (
                 client_id, exclusive_donor, exclusive_client_id,
-                name, first_name, last_name, is_business, business_name,
+                name, first_name, last_name, is_business, business_name, donor_type,
                 phone, email,
                 street_address, address_line2, city, state, postal_code,
                 employer, occupation, job_title, tags, suggested_ask, last_gift_note,
                 notes, bio, photo_url
             ) VALUES (
                 ?, ?, ?,
-                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?,
                 ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?,
@@ -3391,6 +3539,7 @@ app.post('/api/donors', authenticateManager, (req, res) => {
             lastNameValue,
             isBusiness ? 1 : 0,
             businessName,
+            donorType,
             phoneValue,
             emailValue,
             street,
@@ -3476,7 +3625,7 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
             payload.is_business ??
             payload.business
 
-        const isBusiness = parseBooleanFlag(businessFlagInput, {
+        const legacyBusiness = parseBooleanFlag(businessFlagInput, {
             defaultValue: Boolean(existing.is_business),
         })
 
@@ -3488,8 +3637,23 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
                 break
             }
         }
+
+        const donorTypeInput =
+            payload.donorType ??
+            payload.donor_type ??
+            payload.donorCategory ??
+            payload.category ??
+            payload.entityType
+
+        let donorType = resolveDonorType(donorTypeInput, {
+            defaultValue: existing.donor_type || (existing.is_business ? 'business' : 'individual'),
+            isBusinessFlag: legacyBusiness,
+            businessName,
+        })
+
+        const isBusiness = ORGANIZATION_DONOR_TYPES.has(donorType)
         if (isBusiness && !businessName) {
-            businessName = cleanString(payload.company) || businessName
+            businessName = cleanString(payload.company) || businessName || cleanString(rawName)
         }
 
         let name = rawName !== undefined ? rawName : null
@@ -3501,13 +3665,17 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
         if (isBusiness) {
             const resolvedBusinessName = businessName || name || existing.business_name || existing.name
             if (!cleanString(resolvedBusinessName)) {
-                return res.status(400).json({ error: 'Business donors must include a business name' })
+                const message = donorType === 'campaign'
+                    ? 'Campaign and PAC donors must include an organization name'
+                    : 'Business donors must include a business or organization name'
+                return res.status(400).json({ error: message })
             }
             name = cleanString(resolvedBusinessName) || existing.name
             businessName = name
             firstName = null
             lastName = null
         } else {
+            donorType = 'individual'
             businessName = null
             if (!cleanString(name)) {
                 name = existing.name
@@ -3581,6 +3749,7 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
                 last_name = ?,
                 is_business = ?,
                 business_name = ?,
+                donor_type = ?,
                 phone = ?,
                 email = ?,
                 street_address = ?,
@@ -3634,6 +3803,7 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
                 lastName || null,
                 isBusiness ? 1 : 0,
                 businessName,
+                donorType,
                 phoneValue,
                 emailValue,
                 streetValue,

@@ -6,13 +6,15 @@ const state = {
   exclusiveClientId: "",
 };
 
+const DONOR_TYPE_VALUES = ["individual", "business", "campaign"];
+
 const elements = {
   form: document.getElementById("donor-editor-form"),
   status: document.getElementById("editor-status"),
   firstName: document.getElementById("editor-first-name"),
   lastName: document.getElementById("editor-last-name"),
-  businessToggle: document.getElementById("editor-business-toggle"),
-  businessName: document.getElementById("editor-business-name"),
+  donorType: document.getElementById("editor-donor-type"),
+  organizationName: document.getElementById("editor-organization-name"),
   assignments: document.getElementById("editor-client-assignments"),
   selectAll: document.getElementById("select-all-clients"),
   exclusiveToggle: document.getElementById("editor-exclusive-toggle"),
@@ -72,7 +74,7 @@ function bindEvents() {
   elements.selectAll?.addEventListener("click", handleSelectAllClients);
   elements.exclusiveToggle?.addEventListener("change", handleExclusiveToggle);
   elements.exclusiveClient?.addEventListener("change", handleExclusiveClientChange);
-  elements.businessToggle?.addEventListener("change", handleBusinessToggle);
+  elements.donorType?.addEventListener("change", handleDonorTypeChange);
 }
 
 function resetEditorState() {
@@ -81,11 +83,11 @@ function resetEditorState() {
   state.exclusiveDonor = false;
   state.exclusiveClientId = "";
   elements.form?.reset();
-  if (elements.businessToggle) {
-    elements.businessToggle.value = "no";
+  if (elements.donorType) {
+    elements.donorType.value = "individual";
   }
-  if (elements.businessName) {
-    elements.businessName.value = "";
+  if (elements.organizationName) {
+    elements.organizationName.value = "";
   }
   if (elements.exclusiveToggle) {
     elements.exclusiveToggle.value = "no";
@@ -94,7 +96,7 @@ function resetEditorState() {
     elements.exclusiveClient.value = "";
     elements.exclusiveClient.setAttribute("disabled", "true");
   }
-  updateBusinessFieldState();
+  updateIdentityFieldState();
   if (elements.historyYear) elements.historyYear.value = "";
   if (elements.historyCandidate) elements.historyCandidate.value = "";
   if (elements.historyOffice) elements.historyOffice.value = "";
@@ -152,11 +154,13 @@ async function handleSubmit(event) {
     return;
   }
   const formData = new FormData(elements.form);
+  const donorTypeRaw = (formData.get("donorType")?.toString() || "individual").toLowerCase();
+  const donorType = DONOR_TYPE_VALUES.includes(donorTypeRaw) ? donorTypeRaw : "individual";
   const payload = {
     firstName: formData.get("firstName")?.toString().trim() || "",
     lastName: formData.get("lastName")?.toString().trim() || "",
-    isBusiness: (formData.get("isBusiness")?.toString() || "no") === "yes",
-    businessName: formData.get("businessName")?.toString().trim() || "",
+    donorType,
+    organizationName: formData.get("organizationName")?.toString().trim() || "",
     email: formData.get("email")?.toString().trim() || "",
     phone: formData.get("phone")?.toString().trim() || "",
     street: formData.get("street")?.toString().trim() || "",
@@ -179,6 +183,10 @@ async function handleSubmit(event) {
     exclusiveClientId: state.exclusiveDonor ? state.exclusiveClientId : null,
     createdBy: "donor-editor",
   };
+
+  const isOrganization = payload.donorType === "business" || payload.donorType === "campaign";
+  payload.isBusiness = isOrganization;
+  payload.businessName = isOrganization ? payload.organizationName : "";
 
   try {
     const result = await fetchJson("/api/donors", {
@@ -285,20 +293,21 @@ function handleExclusiveClientChange(event) {
   renderAssignments();
 }
 
-function handleBusinessToggle() {
-  updateBusinessFieldState();
+function handleDonorTypeChange() {
+  updateIdentityFieldState();
 }
 
-function updateBusinessFieldState() {
-  const isBusiness = elements.businessToggle?.value === "yes";
-  if (elements.businessName) {
-    elements.businessName.required = Boolean(isBusiness);
+function updateIdentityFieldState() {
+  const type = elements.donorType?.value || "individual";
+  const isOrganization = type === "business" || type === "campaign";
+  if (elements.organizationName) {
+    elements.organizationName.required = isOrganization;
   }
   if (elements.firstName) {
-    elements.firstName.required = !isBusiness;
+    elements.firstName.required = !isOrganization;
   }
   if (elements.lastName) {
-    elements.lastName.required = !isBusiness;
+    elements.lastName.required = !isOrganization;
   }
 }
 

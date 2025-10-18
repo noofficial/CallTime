@@ -40,33 +40,62 @@
               <form class="database-search__form" id="donor-search-form" novalidate>
                 <div class="form-grid">
                   <div class="form-row">
-                    <label class="form-label" for="donor-search-name">Name</label>
+                    <span class="form-label">Donor type</span>
+                    <div class="checkbox-grid" id="donor-search-types">
+                      <label class="form-checkbox" for="donor-type-individual">
+                        <input
+                          id="donor-type-individual"
+                          name="donorType"
+                          type="checkbox"
+                          value="individual"
+                          checked
+                        />
+                        <span>Individuals</span>
+                      </label>
+                      <label class="form-checkbox" for="donor-type-business">
+                        <input
+                          id="donor-type-business"
+                          name="donorType"
+                          type="checkbox"
+                          value="business"
+                          checked
+                        />
+                        <span>Businesses</span>
+                      </label>
+                      <label class="form-checkbox" for="donor-type-campaign">
+                        <input
+                          id="donor-type-campaign"
+                          name="donorType"
+                          type="checkbox"
+                          value="campaign"
+                          checked
+                        />
+                        <span>Campaigns / PACs</span>
+                      </label>
+                    </div>
+                    <p class="muted form-help">Select one or more donor types to include in results.</p>
+                  </div>
+                  <div class="form-row">
+                    <label class="form-label" for="donor-search-individual-name">Individual name</label>
                     <input
                       class="input"
-                      id="donor-search-name"
-                      name="name"
+                      id="donor-search-individual-name"
+                      name="individualName"
                       type="search"
-                      placeholder="Search by donor name"
+                      placeholder="Search by person"
                       autocomplete="off"
                     />
                   </div>
                   <div class="form-row">
-                    <label class="form-label" for="donor-search-business-name">Business name</label>
+                    <label class="form-label" for="donor-search-organization-name">Organization name</label>
                     <input
                       class="input"
-                      id="donor-search-business-name"
-                      name="businessName"
+                      id="donor-search-organization-name"
+                      name="organizationName"
                       type="search"
-                      placeholder="Search by business"
+                      placeholder="Search by organization"
                       autocomplete="organization"
                     />
-                  </div>
-                  <div class="form-row">
-                    <label class="form-checkbox" for="donor-search-business-only">
-                      <input id="donor-search-business-only" name="businessOnly" type="checkbox" />
-                      <span>Business entities only</span>
-                    </label>
-                    <p class="muted form-help">Show only donors flagged as business entities.</p>
                   </div>
                   <div class="form-row">
                     <label class="form-label" for="donor-search-candidates">Candidates donated to</label>
@@ -220,15 +249,21 @@
               <h2>Identity</h2>
                 <div class="editor-grid">
                   <div class="form-row">
-                    <label class="form-label" for="editor-business-toggle">Business entity</label>
-                    <select class="input select" id="editor-business-toggle" name="isBusiness">
-                      <option value="no" selected>No</option>
-                      <option value="yes">Yes</option>
+                    <label class="form-label" for="editor-donor-type">Donor type</label>
+                    <select class="input select" id="editor-donor-type" name="donorType">
+                      <option value="individual" selected>Individual</option>
+                      <option value="business">Business / Organization</option>
+                      <option value="campaign">Campaign / PAC</option>
                     </select>
                   </div>
                   <div class="form-row">
-                    <label class="form-label" for="editor-business-name">Business name</label>
-                    <input class="input" id="editor-business-name" name="businessName" autocomplete="organization" />
+                    <label class="form-label" for="editor-organization-name">Organization name</label>
+                    <input
+                      class="input"
+                      id="editor-organization-name"
+                      name="organizationName"
+                      autocomplete="organization"
+                    />
                   </div>
                   <div class="form-row">
                     <label class="form-label" for="editor-first-name">First name</label>
