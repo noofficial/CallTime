@@ -209,11 +209,12 @@ async function loadData() {
       fetchJson("/api/manager/overview"),
       fetchJson("/api/manager/donors"),
     ]);
-    state.clients = Array.isArray(overview?.clients)
-      ? overview.clients.map(normalizeClient)
+    const clients = Array.isArray(overview?.clients)
+      ? overview.clients.map(normalizeClient).filter(Boolean)
       : [];
+    state.clients = clients;
     state.donors = Array.isArray(donorList)
-      ? sortDonors(donorList.map(normalizeDonorSummary))
+      ? sortDonors(donorList.map((donor) => normalizeDonorSummary(donor, clients)))
       : [];
     state.assignments = buildAssignmentMap(state.donors);
     state.availableGivingCandidates = buildGivingCandidates(state.donors);
@@ -330,7 +331,11 @@ function buildGivingCandidates(donors = []) {
   const candidateSet = new Set();
   donors.forEach((donor) => {
     if (!donor) return;
-    const list = Array.isArray(donor.givingCandidates) ? donor.givingCandidates : [];
+    const list = Array.isArray(donor.searchCandidates)
+      ? donor.searchCandidates
+      : Array.isArray(donor.givingCandidates)
+        ? donor.givingCandidates
+        : [];
     list.forEach((candidate) => {
       if (candidate) {
         candidateSet.add(candidate);
@@ -348,7 +353,7 @@ function renderCandidateFilter() {
   if (!state.availableGivingCandidates.length) {
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = "No recorded giving history";
+    option.textContent = "No candidates available";
     option.disabled = true;
     select.append(option);
     return;
@@ -400,7 +405,7 @@ function resolveDonorTypeFromRecord(donor) {
   return DONOR_TYPE.INDIVIDUAL;
 }
 
-function normalizeDonorSummary(donor) {
+function normalizeDonorSummary(donor, clients = state.clients || []) {
   if (!donor) return null;
   const id = donor.id != null ? String(donor.id) : "";
   const firstName = donor.first_name || "";
@@ -412,6 +417,14 @@ function normalizeDonorSummary(donor) {
   const fallbackName = `${firstName} ${lastName}`.trim();
   const baseName = donor.name || fallbackName || rawOrganizationName;
   const displayName = isOrganization ? rawOrganizationName || baseName : baseName;
+  const clientMap = Array.isArray(clients)
+    ? clients.reduce((map, client) => {
+        if (client && client.id) {
+          map.set(String(client.id), client);
+        }
+        return map;
+      }, new Map())
+    : new Map();
   const askValue =
     donor.suggested_ask === null || donor.suggested_ask === undefined
       ? null
@@ -424,6 +437,15 @@ function normalizeDonorSummary(donor) {
         : null;
   const totalContributed = Number.isFinite(totalContributedRaw) ? totalContributedRaw : 0;
   const givingCandidates = parseDelimitedList(donor.donated_candidates || donor.giving_candidates);
+  const assignedClientIds = parseAssignedIds(donor.assigned_client_ids);
+  const assignedClientLabels = mergeCandidateNames(
+    assignedClientIds
+      .map((clientId) => clientMap.get(clientId))
+      .filter(Boolean)
+      .map((client) => client.candidate || client.label || client.name || ""),
+    parseDelimitedList(donor.assigned_clients || donor.assignedClients),
+  );
+  const searchableCandidates = mergeCandidateNames(givingCandidates, assignedClientLabels);
   return {
     id,
     name: displayName || "New donor",
@@ -452,7 +474,9 @@ function normalizeDonorSummary(donor) {
     notes: donor.notes || "",
     biography: donor.bio || "",
     pictureUrl: donor.photo_url || "",
-    assignedClientIds: parseAssignedIds(donor.assigned_client_ids),
+    assignedClientIds,
+    assignedCandidateNames: assignedClientLabels,
+    searchCandidates: searchableCandidates,
     assignedLabel: donor.assigned_clients || "",
     exclusiveDonor: Boolean(Number(donor.exclusive_donor || donor.exclusiveDonor || 0)),
     exclusiveClientId:
@@ -485,6 +509,23 @@ function parseDelimitedList(raw) {
       }
     });
   return values;
+}
+
+function mergeCandidateNames(...lists) {
+  const seen = new Set();
+  const result = [];
+  lists.forEach((list) => {
+    if (!Array.isArray(list)) return;
+    list.forEach((value) => {
+      const normalized = typeof value === "string" ? value.trim() : "";
+      if (!normalized || seen.has(normalized)) {
+        return;
+      }
+      seen.add(normalized);
+      result.push(normalized);
+    });
+  });
+  return result;
 }
 
 function buildAssignmentMap(donors) {
@@ -563,22 +604,12 @@ function applyFilters() {
         return false;
       }
     }
-    if (businessOnly && !donor.isBusiness) {
-      return false;
-    }
-    if (businessNameTerm) {
-      if (!donor.isBusiness) {
-        return false;
-      }
-      const businessHaystack = (donor.businessName || donor.name || "").toLowerCase();
-      if (!businessHaystack.includes(businessNameTerm)) {
-        return false;
-      }
-    }
     if (candidateSet.size) {
-      const donorCandidates = Array.isArray(donor.givingCandidates)
-        ? donor.givingCandidates.map((candidate) => candidate.toLowerCase())
-        : [];
+      const donorCandidates = Array.isArray(donor.searchCandidates)
+        ? donor.searchCandidates.map((candidate) => candidate.toLowerCase())
+        : Array.isArray(donor.givingCandidates)
+          ? donor.givingCandidates.map((candidate) => candidate.toLowerCase())
+          : [];
       const hasCandidate = donorCandidates.some((candidate) => candidateSet.has(candidate));
       if (!hasCandidate) {
         return false;
@@ -656,7 +687,7 @@ async function ensureDonorDetail(donorId, { force = false } = {}) {
 }
 
 function normalizeDonorDetail(detail) {
-  const summary = normalizeDonorSummary(detail);
+  const summary = normalizeDonorSummary(detail, state.clients);
   const history = Array.isArray(detail.history)
     ? detail.history.map((entry) => ({
         id: entry.id != null ? String(entry.id) : "",
@@ -2082,19 +2113,19 @@ async function refreshData({
   forceDetail = false,
 } = {}) {
   try {
-    const donors = await fetchJson("/api/manager/donors");
-    if (Array.isArray(donors)) {
-      const normalized = sortDonors(donors.map(normalizeDonorSummary));
+    const donorsPromise = fetchJson("/api/manager/donors");
+    const overviewPromise = skipClients ? Promise.resolve(null) : fetchJson("/api/manager/overview");
+    const [donorList, overview] = await Promise.all([donorsPromise, overviewPromise]);
+    if (overview && Array.isArray(overview.clients)) {
+      state.clients = overview.clients.map(normalizeClient).filter(Boolean);
+    }
+    const clients = Array.isArray(state.clients) ? state.clients : [];
+    if (Array.isArray(donorList)) {
+      const normalized = sortDonors(donorList.map((donor) => normalizeDonorSummary(donor, clients)));
       state.donors = normalized;
       state.assignments = buildAssignmentMap(state.donors);
       state.availableGivingCandidates = buildGivingCandidates(state.donors);
       renderCandidateFilter();
-    }
-    if (!skipClients) {
-      const overview = await fetchJson("/api/manager/overview");
-      if (overview && Array.isArray(overview.clients)) {
-        state.clients = overview.clients.map(normalizeClient).filter(Boolean);
-      }
     }
     applyFilters();
     const isActiveDonor = Boolean(donorId && state.filtered.some((item) => item.id === donorId));
