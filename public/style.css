@@ -600,6 +600,24 @@ textarea.input {
   gap: var(--space-8);
 }
 
+.checkbox-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-12);
+}
+
+.form-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-weight: var(--font-weight-medium);
+}
+
+.form-checkbox input[type='checkbox'] {
+  width: 1rem;
+  height: 1rem;
+}
+
 .form-grid {
   display: grid;
   gap: var(--space-16);
@@ -1450,6 +1468,29 @@ body.modal-open {
   gap: var(--space-8);
 }
 
+.database-list__section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-4);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.database-list__section:not(.database-list__section--first) {
+  margin-top: var(--space-4);
+}
+
+.database-list__section-count {
+  font-weight: var(--font-weight-medium);
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--color-text-secondary);
+}
+
 .database-list__item {
   margin: 0;
 }
@@ -2192,6 +2233,166 @@ body.modal-open {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+/* Contribution dashboard */
+.contribution-page .dashboard-header {
+  margin-bottom: 2rem;
+}
+
+.contribution-layout {
+  display: grid;
+  gap: 2rem;
+  padding: 0 0 3rem;
+}
+
+.contribution-summary {
+  align-self: start;
+}
+
+.contribution-summary__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.contribution-summary__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--font-size-sm);
+}
+
+.contribution-summary__stats {
+  margin-bottom: 1rem;
+}
+
+.contribution-status {
+  margin: 0;
+}
+
+.contribution-detail .card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.contribution-empty {
+  text-align: center;
+  padding: 1.25rem;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-base);
+  color: var(--color-text-secondary);
+}
+
+.contribution-grid {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.contribution-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-card-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.contribution-card__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.contribution-card__title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: var(--font-weight-semibold);
+}
+
+.contribution-card__subtitle {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.contribution-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.contribution-card__metrics {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.contribution-metric {
+  background: rgba(var(--color-teal-500-rgb), 0.08);
+  border: 1px solid rgba(var(--color-teal-500-rgb), 0.15);
+  border-radius: var(--radius-base);
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.contribution-metric__value {
+  font-weight: var(--font-weight-semibold);
+  font-size: 1.125rem;
+}
+
+.contribution-metric__label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.contribution-card__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.contribution-card__table th,
+.contribution-card__table td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(var(--color-brown-600-rgb), 0.1);
+}
+
+.contribution-card__table th {
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  font-weight: var(--font-weight-medium);
+}
+
+.contribution-card__table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.contribution-card__empty {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+@media (min-width: 960px) {
+  .contribution-layout {
+    grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .contribution-summary {
+    position: sticky;
+    top: 1.5rem;
+  }
 }
 
 /* Manager dashboard refinements */
