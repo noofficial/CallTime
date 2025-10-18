@@ -377,6 +377,71 @@ function normalizeClient(client) {
   };
 }
 
+const clientRosterCache = new WeakMap();
+
+function normalizeCandidateKey(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function buildCandidateRoster(clients = state.clients || []) {
+  if (!Array.isArray(clients)) return [];
+  const cached = clientRosterCache.get(clients);
+  if (cached) {
+    return cached;
+  }
+  const seen = new Set();
+  const roster = [];
+  clients.forEach((client) => {
+    if (!client) return;
+    const label = client.candidate || client.label || client.name || "";
+    const trimmedLabel = typeof label === "string" ? label.trim() : "";
+    if (!trimmedLabel) return;
+    const key = normalizeCandidateKey(trimmedLabel);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    roster.push({ label: trimmedLabel, key });
+  });
+  clientRosterCache.set(clients, roster);
+  return roster;
+}
+
+function canonicalizeCandidateName(value, clients = state.clients || [], roster) {
+  const label = typeof value === "string" ? value.trim() : "";
+  if (!label) return "";
+  const key = normalizeCandidateKey(label);
+  if (!key) return "";
+  const candidates = Array.isArray(roster) ? roster : buildCandidateRoster(clients);
+  let exactMatch = null;
+  let partialMatch = null;
+  let partialMatchLength = 0;
+  for (const candidate of candidates) {
+    if (!candidate || !candidate.key) continue;
+    if (candidate.key === key) {
+      exactMatch = candidate;
+      break;
+    }
+    if (candidate.key.includes(key) || key.includes(candidate.key)) {
+      const overlapLength = Math.max(candidate.key.length, key.length);
+      if (!partialMatch || overlapLength > partialMatchLength) {
+        partialMatch = candidate;
+        partialMatchLength = overlapLength;
+      }
+    }
+  }
+  if (exactMatch) {
+    return exactMatch.label;
+  }
+  if (partialMatch) {
+    return partialMatch.label;
+  }
+  return label;
+}
+
 function resolveDonorTypeFromRecord(donor) {
   const rawType = (donor.donor_type || donor.donorType || donor.category || donor.entity_type || "")
     .toString()
@@ -425,6 +490,7 @@ function normalizeDonorSummary(donor, clients = state.clients || []) {
         return map;
       }, new Map())
     : new Map();
+  const candidateRoster = buildCandidateRoster(clients);
   const askValue =
     donor.suggested_ask === null || donor.suggested_ask === undefined
       ? null
@@ -436,14 +502,23 @@ function normalizeDonorSummary(donor, clients = state.clients || []) {
         ? Number(donor.totalContributed)
         : null;
   const totalContributed = Number.isFinite(totalContributedRaw) ? totalContributedRaw : 0;
-  const givingCandidates = parseDelimitedList(donor.donated_candidates || donor.giving_candidates);
+  const givingCandidates = mergeCandidateNames(
+    parseDelimitedList(donor.donated_candidates || donor.giving_candidates)
+      .map((candidate) => canonicalizeCandidateName(candidate, clients, candidateRoster))
+      .filter(Boolean),
+  );
   const assignedClientIds = parseAssignedIds(donor.assigned_client_ids);
+  const assignedClientFreeform = parseDelimitedList(donor.assigned_clients || donor.assignedClients)
+    .map((candidate) => canonicalizeCandidateName(candidate, clients, candidateRoster))
+    .filter(Boolean);
   const assignedClientLabels = mergeCandidateNames(
     assignedClientIds
       .map((clientId) => clientMap.get(clientId))
       .filter(Boolean)
-      .map((client) => client.candidate || client.label || client.name || ""),
-    parseDelimitedList(donor.assigned_clients || donor.assignedClients),
+      .map((client) =>
+        canonicalizeCandidateName(client.candidate || client.label || client.name || "", clients, candidateRoster),
+      ),
+    assignedClientFreeform,
   );
   const searchableCandidates = mergeCandidateNames(givingCandidates, assignedClientLabels);
   return {
