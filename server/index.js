@@ -2013,6 +2013,8 @@ ${DONORS_TABLE_COLUMNS_SQL}
         normalizeExistingDonorClientIds()
         ensureColumn('donors', 'exclusive_donor', 'exclusive_donor INTEGER DEFAULT 0')
         ensureColumn('donors', 'exclusive_client_id', 'exclusive_client_id INTEGER')
+        ensureColumn('donors', 'is_business', 'is_business INTEGER DEFAULT 0')
+        ensureColumn('donors', 'business_name', 'business_name TEXT')
         ensureColumn('donors', 'first_name', 'first_name TEXT')
         ensureColumn('donors', 'last_name', 'last_name TEXT')
         ensureColumn('donors', 'job_title', 'job_title TEXT')
@@ -3321,24 +3323,6 @@ app.delete('/api/clients/:clientId', authenticateManager, (req, res) => {
         const donorsTableHasClientId = tableHasColumn('donors', 'client_id')
 
         const removeClient = db.transaction((id) => {
-            let donorIdsForClient = []
-
-            if (assignmentsTableExists) {
-                try {
-                    const donorRows = db
-                        .prepare('SELECT donor_id FROM donor_assignments WHERE client_id = ?')
-                        .all(id)
-                    donorIdsForClient = donorRows.map((row) => row.donor_id)
-                } catch (error) {
-                    console.warn(
-                        'Failed to load donor assignments while deleting client',
-                        id,
-                        error.message
-                    )
-                    donorIdsForClient = []
-                }
-            }
-
             deleteFromTableIfExists('donor_assignments', 'WHERE client_id = ?', [id])
             deleteFromTableIfExists('client_donor_research', 'WHERE client_id = ?', [id])
             deleteFromTableIfExists('client_donor_notes', 'WHERE client_id = ?', [id])
@@ -3346,44 +3330,14 @@ app.delete('/api/clients/:clientId', authenticateManager, (req, res) => {
             deleteFromTableIfExists('call_sessions', 'WHERE client_id = ?', [id])
 
             if (donorsTableHasClientId) {
-                deleteFromTableIfExists('donors', 'WHERE client_id = ?', [id])
-            }
-
-            if (assignmentsTableExists && donorIdsForClient.length) {
-                const uniqueDonorIds = [...new Set(donorIdsForClient)]
-                const placeholders = uniqueDonorIds.map(() => '?').join(', ')
-
-                if (placeholders) {
-                    let stillAssigned = []
-                    try {
-                        const rows = db
-                            .prepare(
-                                `SELECT donor_id FROM donor_assignments WHERE donor_id IN (${placeholders})`
-                            )
-                            .all(...uniqueDonorIds)
-                        stillAssigned = rows.map((row) => row.donor_id)
-                    } catch (error) {
-                        console.warn(
-                            'Failed to inspect remaining donor assignments while deleting client',
-                            id,
-                            error.message
-                        )
-                        stillAssigned = []
-                    }
-
-                    const stillAssignedSet = new Set(stillAssigned)
-                    const removableDonorIds = uniqueDonorIds.filter(
-                        (donorId) => !stillAssignedSet.has(donorId)
+                try {
+                    db.prepare('UPDATE donors SET client_id = NULL WHERE client_id = ?').run(id)
+                } catch (error) {
+                    console.warn(
+                        'Failed to clear client reference from donors while deleting client',
+                        id,
+                        error.message
                     )
-
-                    if (removableDonorIds.length) {
-                        const removePlaceholders = removableDonorIds.map(() => '?').join(', ')
-                        deleteFromTableIfExists(
-                            'donors',
-                            `WHERE id IN (${removePlaceholders})`,
-                            removableDonorIds
-                        )
-                    }
                 }
             }
 
