@@ -14,8 +14,7 @@ CSV exports, and log outcomes that remain private to the active campaign.
 - **Donor categories** capture individuals, businesses, and campaigns/PACs with
   tailored search filters, importer support, and organization-specific fields.
 - **Contribution dashboard** tracks recorded giving for each client with
-  aggregated totals, yearly breakdowns, a 10% company share indicator, and
-  refresh-on-demand status updates.
+  aggregated totals, yearly breakdowns, and refresh-on-demand status updates.
 - **Google Sheet ingestion** still accepts either the `gviz` JSON feed or the
   "Publish to web" CSV link from Sheets when you want to bulk-import records.
 - **Rich donor profiles** surface contact info, giving history, bios, and
