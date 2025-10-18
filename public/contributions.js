@@ -16,6 +16,7 @@ const elements = {
   refresh: document.getElementById("contribution-refresh"),
   status: document.getElementById("contribution-status"),
   totalRaised: document.getElementById("contribution-total-raised"),
+  companyShare: document.getElementById("contribution-company-share"),
   totalContributions: document.getElementById("contribution-total-contributions"),
   activeClients: document.getElementById("contribution-active-clients"),
   refreshedAt: document.getElementById("contribution-refreshed"),
@@ -83,6 +84,7 @@ function render() {
 
 function renderSummary() {
   const totalAmount = state.clients.reduce((sum, client) => sum + toNumber(client?.totalAmount), 0);
+  const companyShare = totalAmount * 0.1;
   const totalContributions = state.clients.reduce(
     (sum, client) => sum + toNumber(client?.contributionCount),
     0,
@@ -94,6 +96,9 @@ function renderSummary() {
 
   if (elements.totalRaised) {
     elements.totalRaised.textContent = `$${formatCurrency(totalAmount)}`;
+  }
+  if (elements.companyShare) {
+    elements.companyShare.textContent = `$${formatCurrency(companyShare)}`;
   }
   if (elements.totalContributions) {
     elements.totalContributions.textContent = formatNumber(totalContributions);
