@@ -563,6 +563,18 @@ function applyFilters() {
         return false;
       }
     }
+    if (businessOnly && !donor.isBusiness) {
+      return false;
+    }
+    if (businessNameTerm) {
+      if (!donor.isBusiness) {
+        return false;
+      }
+      const businessHaystack = (donor.businessName || donor.name || "").toLowerCase();
+      if (!businessHaystack.includes(businessNameTerm)) {
+        return false;
+      }
+    }
     if (candidateSet.size) {
       const donorCandidates = Array.isArray(donor.givingCandidates)
         ? donor.givingCandidates.map((candidate) => candidate.toLowerCase())
