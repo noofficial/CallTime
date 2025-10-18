@@ -2017,6 +2017,8 @@ ${DONORS_TABLE_COLUMNS_SQL}
         ensureColumn('donors', 'business_name', 'business_name TEXT')
         ensureColumn('donors', 'first_name', 'first_name TEXT')
         ensureColumn('donors', 'last_name', 'last_name TEXT')
+        ensureColumn('donors', 'is_business', 'is_business INTEGER DEFAULT 0')
+        ensureColumn('donors', 'business_name', 'business_name TEXT')
         ensureColumn('donors', 'job_title', 'job_title TEXT')
         ensureColumn('donors', 'street_address', 'street_address TEXT')
         ensureColumn('donors', 'address_line2', 'address_line2 TEXT')
