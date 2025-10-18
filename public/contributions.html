@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Contribution Dashboard · CallTime Desk</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body class="workspace workspace--manager contribution-page">
+    <header class="dashboard-header">
+      <div class="container">
+        <div class="header-content">
+          <div>
+            <p class="eyebrow">CallTime Desk</p>
+            <h1>Contribution dashboard</h1>
+            <p class="muted">
+              Review giving history totals recorded for each client and track yearly progress in one place.
+            </p>
+          </div>
+          <nav class="header-actions">
+            <a class="btn btn--ghost" href="index.html">Back to landing</a>
+            <a class="btn btn--outline" href="manager.html">Manager workspace</a>
+            <a class="btn btn--outline" href="donors.html">Donor database</a>
+            <button class="btn btn--ghost" type="button" id="contribution-refresh">Refresh data</button>
+          </nav>
+        </div>
+      </div>
+    </header>
+
+    <main class="container contribution-layout">
+      <section class="card contribution-summary">
+        <div class="card__header contribution-summary__header">
+          <div>
+            <h2>Giving overview</h2>
+            <p class="muted">Totals reflect donor contributions logged in the database.</p>
+          </div>
+          <div class="contribution-summary__meta">
+            <span class="muted">Last updated <span id="contribution-refreshed">—</span></span>
+          </div>
+        </div>
+        <div class="card__body">
+          <div class="stat-grid contribution-summary__stats">
+            <div class="stat-card">
+              <div class="stat-value" id="contribution-total-raised">$0</div>
+              <div class="stat-label">Total raised across clients</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="contribution-total-contributions">0</div>
+              <div class="stat-label">Recorded contributions</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="contribution-active-clients">0</div>
+              <div class="stat-label">Clients with updates</div>
+            </div>
+          </div>
+          <p class="contribution-status muted hidden" id="contribution-status" role="status"></p>
+        </div>
+      </section>
+
+      <section class="card contribution-detail">
+        <div class="card__header">
+          <div>
+            <h2>Client giving detail</h2>
+            <p class="muted">Explore contributions recorded for each client by year.</p>
+          </div>
+        </div>
+        <div class="card__body">
+          <div id="contribution-empty" class="contribution-empty hidden">
+            <p>No campaign clients are available yet. Add a client to begin tracking giving updates.</p>
+          </div>
+          <div id="contribution-client-list" class="contribution-grid"></div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container">
+        <p>
+          Proprietary software created and used by Silver Basin Strategies. Unauthorized or unapproved distribution of
+          any data from this system is prohibited.
+        </p>
+      </div>
+    </footer>
+
+    <script type="module" src="contributions.js"></script>
+  </body>
+</html>

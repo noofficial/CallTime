@@ -11,6 +11,10 @@ CSV exports, and log outcomes that remain private to the active campaign.
 - **Dedicated donor database** capture full profiles (contact, biography,
   company, industry, photo, and structured giving history) through the in-app
   editor—no spreadsheet required.
+- **Donor categories** capture individuals, businesses, and campaigns/PACs with
+  tailored search filters, importer support, and organization-specific fields.
+- **Contribution dashboard** tracks recorded giving for each client with
+  aggregated totals, yearly breakdowns, and refresh-on-demand status updates.
 - **Google Sheet ingestion** still accepts either the `gviz` JSON feed or the
   "Publish to web" CSV link from Sheets when you want to bulk-import records.
 - **Rich donor profiles** surface contact info, giving history, bios, and
@@ -73,9 +77,15 @@ header to review and edit the profiles attached to the selected campaign.
 - Add donors with the **New donor** button, then fill in identity, contact,
   professional, and biography fields. Suggested asks, last gift notes, and tags
   help you organize follow-up plans.
+- Choose a **Donor type** (Individual, Business, or Campaign/PAC) to tailor the
+  identity form. Organization records focus on the official name, while
+  individual profiles emphasize first and last name matching in search.
 - Record detailed giving history by entering an election year, candidate, and
   contribution amount. Each entry is grouped automatically by year, so you can
   scan a donor’s past activity at a glance during call time.
+- Filter by "Candidates donated to" to match recipients from logged giving
+  history. Current clients are excluded from this list so the dashboard focuses
+  on external giving; visit the Contribution dashboard for client totals.
 - Upload photo URLs to quickly differentiate supporters or to surface visual
   cues for your candidate.
 - Use the JSON export button to create a portable backup of the current
@@ -94,6 +104,11 @@ skipped automatically.
 - **Core donor fields:** `Name`, `First Name`, `Last Name`, `Email`, `Phone`,
   `City`, `Employer`, `Occupation`, `Suggested Ask`, `Last Gift`, `Tags`,
   `Notes`, and `Photo URL` map to the donor profile.
+- **Donor type & organization name:** include a `Donor Type` column with values
+  such as `Individual`, `Business`, or `Campaign/PAC`. Organization rows should
+  provide an `Organization Name` (mapped to `Business Name`) so searches and
+  profiles display the correct entity. When the donor type column is missing or
+  blank, the importer defaults to individual donors.
 - **Campaign assignment:** include `Client ID`, `Client`, or `Campaign` to assign
   donors to a specific workspace. Leave the column out (or select **No client**)
   to keep donors unassigned after import.
@@ -103,6 +118,39 @@ skipped automatically.
   `Contribution 2 Year`, `Contribution 2 Candidate`, `Contribution 2 Amount`).
   Each complete triplet is linked to the donor automatically, and duplicates are
   skipped so the history stays clean.
+
+For spreadsheets that mix donor types, dedicate adjacent columns to identity
+information so the importer can map them cleanly:
+
+- `Donor Type` – `Individual`, `Business`, or `Campaign/PAC`.
+- `Organization Name` – required for business and campaign rows.
+- `First Name` / `Last Name` – primary identifiers for individual records; keep
+  optional contact names for organizations in these columns.
+- `Email`, `Phone`, `Street`, `City`, `State`, and `Postal Code` – shared across
+  every category.
+
+Leave the donor type blank for standard individuals. Any rows flagged as
+Business or Campaign/PAC automatically populate the organization search fields
+and appear when the **Organization name** filter or donor-type checkboxes are
+used in the database.
+
+### Recommended column layout
+
+| Column header | Purpose | Applies to |
+| --- | --- | --- |
+| `Donor Type` | Set to `Individual`, `Business`, or `Campaign/PAC` (blank defaults to Individual). | All donors |
+| `Organization Name` | Legal entity name surfaced in search and profiles. | Business, Campaign/PAC |
+| `Primary Contact First Name` / `Primary Contact Last Name` | Inline contact for organizations; leave blank for entity-only records. | Business, Campaign/PAC |
+| `First Name` / `Last Name` | Personal name for the donor. Use when `Donor Type` is Individual. | Individual |
+| `Email`, `Phone`, `Street`, `City`, `State`, `Postal Code` | Shared contact information across every donor type. | All donors |
+| `Tags`, `Suggested Ask`, `Last Gift`, `Notes` | Optional stewardship context imported verbatim into the profile. | All donors |
+| `Contribution 1 Year`, `Contribution 1 Candidate`, `Contribution 1 Amount` | Structured giving history (repeat numbering for additional gifts). | All donors |
+
+When building spreadsheets that mix donor types, keep organization names,
+contact names, and addresses in separate columns. The importer automatically
+maps aliases such as `Primary Contact First Name` to the inline editor so
+organizations and individuals land in the correct search fields without
+additional cleanup.
 
 The status message that appears after an import callout summarizes how many
 donors were inserted, updated, or skipped, along with how many contributions
