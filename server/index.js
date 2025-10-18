@@ -287,6 +287,29 @@ const cleanString = (value) => {
     return converted === '' ? null : converted
 }
 
+const normalizeCandidateKey = (value) => {
+    const cleaned = cleanString(value)
+    if (!cleaned) return ''
+    return cleaned
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim()
+        .replace(/\s+/g, ' ')
+}
+
+const parseDateValue = (value) => {
+    if (!value) return null
+    const direct = new Date(value)
+    if (!Number.isNaN(direct.getTime())) {
+        return direct
+    }
+    const normalized = new Date(String(value).replace(' ', 'T'))
+    if (!Number.isNaN(normalized.getTime())) {
+        return normalized
+    }
+    return null
+}
+
 const normalizeOptionalField = (value) => {
     if (value === undefined || value === null) return null
     if (typeof value === 'string') {
@@ -2187,6 +2210,112 @@ app.get('/api/manager/overview', authenticateManager, (req, res) => {
                 unassignedDonors: unassignedDonors.count,
                 activeClients: clients.length
             }
+        })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+})
+
+app.get('/api/manager/giving/clients', authenticateManager, (req, res) => {
+    try {
+        const clients = db.prepare(`
+            SELECT id, name, candidate
+            FROM clients
+            ORDER BY COALESCE(NULLIF(name, ''), NULLIF(candidate, ''), CAST(id AS TEXT))
+        `).all()
+
+        const candidateLookup = new Map()
+        clients.forEach((client) => {
+            const labels = [client.candidate, client.name]
+            labels
+                .map((label) => normalizeCandidateKey(label))
+                .filter((key) => key && !candidateLookup.has(key))
+                .forEach((key) => candidateLookup.set(key, client.id))
+        })
+
+        const contributions = db.prepare(`
+            SELECT candidate, year, amount, created_at
+            FROM giving_history
+            WHERE candidate IS NOT NULL AND TRIM(candidate) <> ''
+        `).all()
+
+        const summaryByClient = new Map()
+
+        contributions.forEach((row) => {
+            const candidateKey = normalizeCandidateKey(row.candidate)
+            if (!candidateKey) {
+                return
+            }
+            const clientId = candidateLookup.get(candidateKey)
+            if (!clientId) {
+                return
+            }
+
+            const amountValue = Number(row.amount)
+            const amount = Number.isFinite(amountValue) ? amountValue : 0
+            const entry = summaryByClient.get(clientId) || {
+                totalAmount: 0,
+                contributionCount: 0,
+                lastContributionAt: null,
+                lastContributionAtMs: null,
+                years: new Map(),
+            }
+
+            entry.totalAmount = Number((entry.totalAmount + amount).toFixed(2))
+            entry.contributionCount += 1
+            if (row.created_at) {
+                const createdAt = parseDateValue(row.created_at)
+                if (createdAt) {
+                    const createdMs = createdAt.getTime()
+                    if (entry.lastContributionAtMs === null || createdMs > entry.lastContributionAtMs) {
+                        entry.lastContributionAtMs = createdMs
+                        entry.lastContributionAt = createdAt.toISOString()
+                    }
+                } else if (!entry.lastContributionAt) {
+                    entry.lastContributionAt = row.created_at
+                }
+            }
+
+            const parsedYear = Number.parseInt(row.year, 10)
+            const yearKey = Number.isInteger(parsedYear) ? String(parsedYear) : 'unknown'
+            const yearEntry = entry.years.get(yearKey) || {
+                year: Number.isInteger(parsedYear) ? parsedYear : null,
+                totalAmount: 0,
+                contributionCount: 0,
+            }
+            yearEntry.totalAmount = Number((yearEntry.totalAmount + amount).toFixed(2))
+            yearEntry.contributionCount += 1
+            entry.years.set(yearKey, yearEntry)
+
+            summaryByClient.set(clientId, entry)
+        })
+
+        const responseClients = clients.map((client) => {
+            const summary = summaryByClient.get(client.id)
+            const years = summary
+                ? Array.from(summary.years.values()).sort((a, b) => {
+                    if (a.year === null && b.year === null) return 0
+                    if (a.year === null) return 1
+                    if (b.year === null) return -1
+                    return b.year - a.year
+                })
+                : []
+
+            return {
+                id: client.id,
+                name: client.name || '',
+                candidate: client.candidate || '',
+                displayName: client.name || client.candidate || `Client ${client.id}`,
+                totalAmount: summary ? summary.totalAmount : 0,
+                contributionCount: summary ? summary.contributionCount : 0,
+                lastContributionAt: summary ? summary.lastContributionAt : null,
+                years,
+            }
+        })
+
+        res.json({
+            generatedAt: new Date().toISOString(),
+            clients: responseClients,
         })
     } catch (error) {
         res.status(500).json({ error: error.message })

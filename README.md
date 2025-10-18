@@ -13,6 +13,8 @@ CSV exports, and log outcomes that remain private to the active campaign.
   editor—no spreadsheet required.
 - **Donor categories** capture individuals, businesses, and campaigns/PACs with
   tailored search filters, importer support, and organization-specific fields.
+- **Contribution dashboard** tracks recorded giving for each client with
+  aggregated totals, yearly breakdowns, and refresh-on-demand status updates.
 - **Google Sheet ingestion** still accepts either the `gviz` JSON feed or the
   "Publish to web" CSV link from Sheets when you want to bulk-import records.
 - **Rich donor profiles** surface contact info, giving history, bios, and
@@ -81,6 +83,9 @@ header to review and edit the profiles attached to the selected campaign.
 - Record detailed giving history by entering an election year, candidate, and
   contribution amount. Each entry is grouped automatically by year, so you can
   scan a donor’s past activity at a glance during call time.
+- Filter by "Candidates donated to" to match recipients from logged giving
+  history. Current clients are excluded from this list so the dashboard focuses
+  on external giving; visit the Contribution dashboard for client totals.
 - Upload photo URLs to quickly differentiate supporters or to surface visual
   cues for your candidate.
 - Use the JSON export button to create a portable backup of the current
