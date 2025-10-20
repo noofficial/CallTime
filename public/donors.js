@@ -81,6 +81,7 @@ const elements = {
   searchTags: document.getElementById("donor-search-tags"),
   searchReset: document.getElementById("donor-search-reset"),
   resultsList: document.getElementById("database-results-list"),
+  resultsLayout: document.getElementById("database-results-layout"),
   resultsEmpty: document.getElementById("database-results-empty"),
   resultsEmptyTitle: document.getElementById("database-results-empty-title"),
   resultsEmptyMessage: document.getElementById("database-results-empty-message"),
@@ -779,6 +780,7 @@ function render() {
 
 function renderSearchResults() {
   const list = elements.resultsList;
+  const layout = elements.resultsLayout;
   const empty = elements.resultsEmpty;
   const emptyTitle = elements.resultsEmptyTitle;
   const emptyMessage = elements.resultsEmptyMessage;
@@ -790,6 +792,7 @@ function renderSearchResults() {
     setResultsEmptyState("Search donors", "Enter one or more filters above, then search to see matching donors.");
     empty.classList.remove("hidden");
     list.classList.add("hidden");
+    layout?.classList.add("hidden");
     if (elements.detailEmpty) {
       elements.detailEmpty.classList.add("hidden");
     }
@@ -800,6 +803,7 @@ function renderSearchResults() {
     setResultsEmptyState("No donors found", "Try adjusting your filters or clearing them to expand the results.");
     empty.classList.remove("hidden");
     list.classList.add("hidden");
+    layout?.classList.add("hidden");
     if (elements.detailEmpty) {
       elements.detailEmpty.classList.add("hidden");
     }
@@ -808,6 +812,7 @@ function renderSearchResults() {
 
   empty.classList.add("hidden");
   list.classList.remove("hidden");
+  layout?.classList.remove("hidden");
 
   const groups = buildDonorTypeGroups(state.filtered);
   const selectedTypes = Array.isArray(state.filters?.types) && state.filters.types.length
@@ -825,6 +830,8 @@ function renderSearchResults() {
       list.append(item);
     });
   });
+
+  list.scrollTop = 0;
 
   if (!state.selectedDonorId && elements.detailEmpty) {
     elements.detailEmpty.classList.remove("hidden");
