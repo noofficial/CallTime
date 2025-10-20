@@ -4047,6 +4047,7 @@ function getDonorDetail(donorId) {
 function buildGivingSummary(rows = []) {
     const donors = new Map()
     const years = new Map()
+    const categories = new Map()
     let totalAmount = 0
     let contributionCount = 0
 
@@ -4060,6 +4061,7 @@ function buildGivingSummary(rows = []) {
         const year = Number.isFinite(yearValue) ? yearValue : null
         const candidate = row.candidate || null
         const officeSought = row.office_sought || row.officeSought || null
+        const donorType = normalizeDonorTypeValue(row.donor_type) || 'individual'
 
         contributionCount += 1
         totalAmount += amount
@@ -4071,10 +4073,12 @@ function buildGivingSummary(rows = []) {
                     donorName: donorName || 'Unnamed donor',
                     totalAmount: 0,
                     contributionCount: 0,
+                    donorType,
                     contributions: []
                 })
             }
             const donorEntry = donors.get(donorId)
+            donorEntry.donorType = donorType
             donorEntry.totalAmount += amount
             donorEntry.contributionCount += 1
             donorEntry.contributions.push({
@@ -4101,6 +4105,21 @@ function buildGivingSummary(rows = []) {
         yearEntry.totalAmount += amount
         if (donorId) {
             yearEntry.donorIds.add(donorId)
+        }
+
+        if (!categories.has(donorType)) {
+            categories.set(donorType, {
+                type: donorType,
+                donorIds: new Set(),
+                contributionCount: 0,
+                totalAmount: 0
+            })
+        }
+        const categoryEntry = categories.get(donorType)
+        categoryEntry.contributionCount += 1
+        categoryEntry.totalAmount += amount
+        if (donorId) {
+            categoryEntry.donorIds.add(donorId)
         }
     })
 
@@ -4145,6 +4164,28 @@ function buildGivingSummary(rows = []) {
         return b.year - a.year
     })
 
+    const categoryCollection = Array.from(categories.values()).map((entry) => ({
+        type: entry.type,
+        donorCount: entry.donorIds.size,
+        contributionCount: entry.contributionCount,
+        totalAmount: entry.totalAmount
+    }))
+
+    categoryCollection.sort((a, b) => {
+        const indexA = DONOR_TYPE_VALUES.indexOf(a.type)
+        const indexB = DONOR_TYPE_VALUES.indexOf(b.type)
+        if (indexA !== -1 && indexB !== -1 && indexA !== indexB) {
+            return indexA - indexB
+        }
+        if (indexA !== indexB) {
+            return indexB - indexA
+        }
+        if (b.totalAmount !== a.totalAmount) {
+            return b.totalAmount - a.totalAmount
+        }
+        return (a.type || '').localeCompare(b.type || '')
+    })
+
     return {
         totals: {
             totalAmount,
@@ -4152,7 +4193,8 @@ function buildGivingSummary(rows = []) {
             donorCount: donorCollection.length
         },
         donors: donorCollection,
-        years: yearCollection
+        years: yearCollection,
+        categories: categoryCollection
     }
 }
 
@@ -4165,7 +4207,7 @@ app.get('/api/giving/candidates/:candidate/summary', authenticateManager, (req, 
     try {
         const contributions = db.prepare(`
             SELECT gh.id, gh.donor_id, gh.year, gh.candidate, gh.office_sought, gh.amount, gh.created_at,
-                   d.name AS donor_name
+                   d.name AS donor_name, d.donor_type AS donor_type
             FROM giving_history gh
             JOIN donors d ON d.id = gh.donor_id
             WHERE LOWER(TRIM(gh.candidate)) = LOWER(TRIM(?))
@@ -4181,6 +4223,7 @@ app.get('/api/giving/candidates/:candidate/summary', authenticateManager, (req, 
             totals: summary.totals,
             years: summary.years,
             donors: summary.donors,
+            categories: summary.categories,
         })
     } catch (error) {
         res.status(500).json({ error: error.message })
@@ -4192,6 +4235,7 @@ app.get('/api/giving/search', authenticateManager, (req, res) => {
     const amount = parseNonNegativeNumber(req.query.amount)
     let minAmount = parseNonNegativeNumber(req.query.minAmount)
     let maxAmount = parseNonNegativeNumber(req.query.maxAmount)
+    const donorType = normalizeDonorTypeValue(req.query.donorType)
 
     if (amount !== null) {
         minAmount = null
@@ -4202,8 +4246,8 @@ app.get('/api/giving/search', authenticateManager, (req, res) => {
         maxAmount = temp
     }
 
-    if (year === null && amount === null && minAmount === null && maxAmount === null) {
-        return res.status(400).json({ error: 'Provide at least one search filter (year or amount).' })
+    if (year === null && amount === null && minAmount === null && maxAmount === null && !donorType) {
+        return res.status(400).json({ error: 'Provide at least one search filter (year, amount, or donor type).' })
     }
 
     const filters = []
@@ -4226,13 +4270,17 @@ app.get('/api/giving/search', authenticateManager, (req, res) => {
             params.push(maxAmount)
         }
     }
+    if (donorType) {
+        filters.push('d.donor_type = ?')
+        params.push(donorType)
+    }
 
     const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : ''
 
     try {
         const contributions = db.prepare(`
             SELECT gh.id, gh.donor_id, gh.year, gh.candidate, gh.office_sought, gh.amount, gh.created_at,
-                   d.name AS donor_name
+                   d.name AS donor_name, d.donor_type AS donor_type
             FROM giving_history gh
             JOIN donors d ON d.id = gh.donor_id
             ${whereClause}
@@ -4247,10 +4295,12 @@ app.get('/api/giving/search', authenticateManager, (req, res) => {
                 amount,
                 minAmount: amount !== null ? null : minAmount,
                 maxAmount: amount !== null ? null : maxAmount,
+                donorType,
             },
             totals: summary.totals,
             years: summary.years,
             donors: summary.donors,
+            categories: summary.categories,
         })
     } catch (error) {
         res.status(500).json({ error: error.message })
