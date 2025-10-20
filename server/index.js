@@ -60,6 +60,7 @@ const upload = multer({
 })
 
 const BULK_UPLOAD_ACTOR = 'bulk-import'
+const TARGET_CYCLE_YEAR = 2026
 
 const DONOR_TYPE_VALUES = ['individual', 'business', 'campaign']
 const ORGANIZATION_DONOR_TYPES = new Set(['business', 'campaign'])
@@ -2257,6 +2258,20 @@ app.get('/api/manager/giving/clients', authenticateManager, (req, res) => {
 
             const amountValue = Number(row.amount)
             const amount = Number.isFinite(amountValue) ? amountValue : 0
+            const parsedYear = Number.parseInt(row.year, 10)
+            const yearKey = Number.isInteger(parsedYear) ? String(parsedYear) : 'unknown'
+
+            let normalizedCreatedAt = null
+            let normalizedCreatedAtMs = null
+            const rawCreatedAt = row.created_at || null
+            if (rawCreatedAt) {
+                const parsedCreatedAt = parseDateValue(rawCreatedAt)
+                if (parsedCreatedAt) {
+                    normalizedCreatedAt = parsedCreatedAt.toISOString()
+                    normalizedCreatedAtMs = parsedCreatedAt.getTime()
+                }
+            }
+
             const entry = summaryByClient.get(clientId) || {
                 totalAmount: 0,
                 contributionCount: 0,
@@ -2267,28 +2282,32 @@ app.get('/api/manager/giving/clients', authenticateManager, (req, res) => {
 
             entry.totalAmount = Number((entry.totalAmount + amount).toFixed(2))
             entry.contributionCount += 1
-            if (row.created_at) {
-                const createdAt = parseDateValue(row.created_at)
-                if (createdAt) {
-                    const createdMs = createdAt.getTime()
-                    if (entry.lastContributionAtMs === null || createdMs > entry.lastContributionAtMs) {
-                        entry.lastContributionAtMs = createdMs
-                        entry.lastContributionAt = createdAt.toISOString()
-                    }
-                } else if (!entry.lastContributionAt) {
-                    entry.lastContributionAt = row.created_at
+            if (normalizedCreatedAtMs !== null) {
+                if (entry.lastContributionAtMs === null || normalizedCreatedAtMs > entry.lastContributionAtMs) {
+                    entry.lastContributionAtMs = normalizedCreatedAtMs
+                    entry.lastContributionAt = normalizedCreatedAt
                 }
+            } else if (!entry.lastContributionAt && rawCreatedAt) {
+                entry.lastContributionAt = rawCreatedAt
             }
 
-            const parsedYear = Number.parseInt(row.year, 10)
-            const yearKey = Number.isInteger(parsedYear) ? String(parsedYear) : 'unknown'
             const yearEntry = entry.years.get(yearKey) || {
                 year: Number.isInteger(parsedYear) ? parsedYear : null,
                 totalAmount: 0,
                 contributionCount: 0,
+                lastContributionAt: null,
+                lastContributionAtMs: null,
             }
             yearEntry.totalAmount = Number((yearEntry.totalAmount + amount).toFixed(2))
             yearEntry.contributionCount += 1
+            if (normalizedCreatedAtMs !== null) {
+                if (yearEntry.lastContributionAtMs === null || normalizedCreatedAtMs > yearEntry.lastContributionAtMs) {
+                    yearEntry.lastContributionAtMs = normalizedCreatedAtMs
+                    yearEntry.lastContributionAt = normalizedCreatedAt
+                }
+            } else if (!yearEntry.lastContributionAt && rawCreatedAt) {
+                yearEntry.lastContributionAt = rawCreatedAt
+            }
             entry.years.set(yearKey, yearEntry)
 
             summaryByClient.set(clientId, entry)
@@ -2297,22 +2316,34 @@ app.get('/api/manager/giving/clients', authenticateManager, (req, res) => {
         const responseClients = clients.map((client) => {
             const summary = summaryByClient.get(client.id)
             const years = summary
-                ? Array.from(summary.years.values()).sort((a, b) => {
-                    if (a.year === null && b.year === null) return 0
-                    if (a.year === null) return 1
-                    if (b.year === null) return -1
-                    return b.year - a.year
-                })
+                ? Array.from(summary.years.values())
+                      .map(({ year, totalAmount, contributionCount, lastContributionAt }) => ({
+                          year,
+                          totalAmount,
+                          contributionCount,
+                          lastContributionAt: lastContributionAt || null,
+                      }))
+                      .sort((a, b) => {
+                          if (a.year === null && b.year === null) return 0
+                          if (a.year === null) return 1
+                          if (b.year === null) return -1
+                          return b.year - a.year
+                      })
                 : []
+
+            const targetYearSummary = summary ? summary.years.get(String(TARGET_CYCLE_YEAR)) : null
+            const cycleTotalAmount = targetYearSummary ? targetYearSummary.totalAmount : 0
+            const cycleContributionCount = targetYearSummary ? targetYearSummary.contributionCount : 0
+            const cycleLastContributionAt = targetYearSummary ? targetYearSummary.lastContributionAt || null : null
 
             return {
                 id: client.id,
                 name: client.name || '',
                 candidate: client.candidate || '',
                 displayName: client.name || client.candidate || `Client ${client.id}`,
-                totalAmount: summary ? summary.totalAmount : 0,
-                contributionCount: summary ? summary.contributionCount : 0,
-                lastContributionAt: summary ? summary.lastContributionAt : null,
+                totalAmount: cycleTotalAmount,
+                contributionCount: cycleContributionCount,
+                lastContributionAt: cycleLastContributionAt,
                 years,
             }
         })
