@@ -19,12 +19,12 @@ const ORGANIZATION_DONOR_TYPES = new Set([DONOR_TYPE.BUSINESS, DONOR_TYPE.CAMPAI
 const DONOR_TYPE_LABELS = {
   [DONOR_TYPE.INDIVIDUAL]: "Individual",
   [DONOR_TYPE.BUSINESS]: "Business",
-  [DONOR_TYPE.CAMPAIGN]: "Campaign / PAC",
+  [DONOR_TYPE.CAMPAIGN]: "Organization / PAC",
 };
 const DONOR_TYPE_SECTION_LABELS = {
   [DONOR_TYPE.INDIVIDUAL]: "Individuals",
   [DONOR_TYPE.BUSINESS]: "Businesses",
-  [DONOR_TYPE.CAMPAIGN]: "Campaigns / PACs",
+  [DONOR_TYPE.CAMPAIGN]: "Organizations / PACs",
 };
 const DONOR_TYPE_POSITION = DONOR_TYPE_ORDER.reduce((acc, type, index) => {
   acc[type] = index;
@@ -59,6 +59,7 @@ const state = {
       minAmount: "",
       maxAmount: "",
       year: "",
+      donorType: "",
     },
     searchResults: null,
     searchLoading: false,
@@ -2418,7 +2419,7 @@ function renderGivingInsights() {
         ? `All recorded contributions for ${candidateName}.`
         : "Select a candidate from any donor's contribution history to see their supporters by year.";
     } else {
-      subtitle.textContent = "Find donors by exact amounts, ranges, or the year they contributed.";
+      subtitle.textContent = "Find donors by exact amounts, ranges, year, or donor type.";
     }
   }
 
@@ -2474,6 +2475,7 @@ function renderCandidateInsights(container) {
   }
 
   container.append(createInsightsSummary(report.totals));
+  container.append(createCategoryBreakdown(report.categories));
   container.append(createYearBreakdown(report.years));
   container.append(createDonorInsightsList(report.donors, { includeCandidate: false }));
 }
@@ -2495,7 +2497,7 @@ function renderSearchInsights(container) {
   if (!results) {
     container.append(
       createInsightsMessage(
-        "Enter an exact amount, a range, or a year and choose Search to find matching contributions.",
+        "Enter an exact amount, a range, a year, or choose a donor type and select Search to find matching contributions.",
         "muted",
       ),
     );
@@ -2507,6 +2509,7 @@ function renderSearchInsights(container) {
   }
 
   container.append(createInsightsSummary(results.totals));
+  container.append(createCategoryBreakdown(results.categories));
   container.append(createYearBreakdown(results.years));
   container.append(createDonorInsightsList(results.donors, { includeCandidate: true }));
 }
@@ -2520,7 +2523,7 @@ function createGivingSearchForm() {
   const description = document.createElement("p");
   description.className = "muted insights-search__description";
   description.textContent =
-    "Use an exact amount to ignore the range fields, or provide a minimum and/or maximum amount along with an optional year.";
+    "Use an exact amount to ignore the range fields, provide a minimum and/or maximum amount with an optional year, or narrow results by donor type.";
   form.append(description);
 
   const grid = document.createElement("div");
@@ -2540,6 +2543,14 @@ function createGivingSearchForm() {
       { step: "any", min: "0", placeholder: "1000" },
     ),
     createSearchField("Year", "year", searchFilters.year, { inputType: "number", min: "1900", max: "2100", placeholder: "2024" }),
+    createSearchSelect("Donor type", "donorType", searchFilters.donorType, {
+      includeEmpty: true,
+      choices: [
+        { value: DONOR_TYPE.INDIVIDUAL, label: DONOR_TYPE_LABELS[DONOR_TYPE.INDIVIDUAL] },
+        { value: DONOR_TYPE.BUSINESS, label: DONOR_TYPE_LABELS[DONOR_TYPE.BUSINESS] },
+        { value: DONOR_TYPE.CAMPAIGN, label: DONOR_TYPE_LABELS[DONOR_TYPE.CAMPAIGN] },
+      ],
+    }),
   );
   form.append(grid);
 
@@ -2555,7 +2566,7 @@ function createGivingSearchForm() {
   clear.className = "btn btn--ghost";
   clear.textContent = "Clear";
   clear.addEventListener("click", () => {
-    state.givingInsights.searchFilters = { amount: "", minAmount: "", maxAmount: "", year: "" };
+    state.givingInsights.searchFilters = { amount: "", minAmount: "", maxAmount: "", year: "", donorType: "" };
     state.givingInsights.searchResults = null;
     state.givingInsights.lastExecutedFilters = null;
     state.givingInsights.searchError = null;
@@ -2591,6 +2602,41 @@ function createSearchField(labelText, name, value, options = {}) {
   return wrapper;
 }
 
+function createSearchSelect(labelText, name, value, options = {}) {
+  const wrapper = document.createElement("label");
+  wrapper.className = "insights-search__field";
+  wrapper.setAttribute("for", `insights-${name}`);
+
+  const label = document.createElement("span");
+  label.className = "insights-search__label";
+  label.textContent = labelText;
+
+  const select = document.createElement("select");
+  select.className = "input";
+  select.id = `insights-${name}`;
+  select.name = name;
+
+  if (options.includeEmpty) {
+    const emptyOption = document.createElement("option");
+    emptyOption.value = "";
+    emptyOption.textContent = options.emptyLabel || "All donor types";
+    select.append(emptyOption);
+  }
+
+  (options.choices || []).forEach((choice) => {
+    const option = document.createElement("option");
+    option.value = choice.value;
+    option.textContent = choice.label;
+    if (choice.value === value) {
+      option.selected = true;
+    }
+    select.append(option);
+  });
+
+  wrapper.append(label, select);
+  return wrapper;
+}
+
 function createInsightsSummary(totals = {}) {
   const summary = document.createElement("dl");
   summary.className = "insights-summary";
@@ -2622,6 +2668,45 @@ function createInsightsSummary(totals = {}) {
   });
 
   return summary;
+}
+
+function createCategoryBreakdown(categories = []) {
+  const section = document.createElement("section");
+  section.className = "insights-panel__section";
+  const heading = document.createElement("h3");
+  heading.textContent = "By donor type";
+  section.append(heading);
+
+  if (!Array.isArray(categories) || !categories.length) {
+    section.append(createInsightsMessage("No donor type breakdown available.", "muted"));
+    return section;
+  }
+
+  const table = document.createElement("table");
+  table.className = "insights-table";
+  const head = document.createElement("thead");
+  head.innerHTML = "<tr><th>Donor type</th><th>Donors</th><th>Entries</th><th>Total raised</th></tr>";
+  table.append(head);
+
+  const body = document.createElement("tbody");
+  categories.forEach((category) => {
+    const row = document.createElement("tr");
+    const typeCell = document.createElement("td");
+    typeCell.textContent = formatDonorTypeLabel(category.type);
+    const donorsCell = document.createElement("td");
+    donorsCell.textContent = `${category.donorCount || 0}`;
+    const entriesCell = document.createElement("td");
+    entriesCell.textContent = `${category.contributionCount || 0}`;
+    const amountCell = document.createElement("td");
+    amountCell.textContent =
+      category.totalAmount != null ? `$${formatCurrency(category.totalAmount)}` : "$0";
+    row.append(typeCell, donorsCell, entriesCell, amountCell);
+    body.append(row);
+  });
+
+  table.append(body);
+  section.append(table);
+  return section;
 }
 
 function createYearBreakdown(years = []) {
@@ -2689,9 +2774,17 @@ function createDonorInsightsList(donors = [], { includeCandidate = false } = {})
     name.textContent = donor.donorName || "Unnamed donor";
     const meta = document.createElement("p");
     meta.className = "muted";
-    meta.textContent = `${donor.totalAmount ? `$${formatCurrency(donor.totalAmount)}` : "$0"} total · ${
-      donor.contributionCount || 0
-    } ${pluralize(donor.contributionCount || 0, "entry", "entries")}`;
+    const metaParts = [];
+    const totalLabel = donor.totalAmount ? `$${formatCurrency(donor.totalAmount)}` : "$0";
+    metaParts.push(`${totalLabel} total`);
+    metaParts.push(
+      `${donor.contributionCount || 0} ${pluralize(donor.contributionCount || 0, "entry", "entries")}`,
+    );
+    const typeLabel = formatDonorTypeLabel(donor.donorType);
+    if (typeLabel) {
+      metaParts.push(typeLabel);
+    }
+    meta.textContent = metaParts.join(" · ");
     title.append(name, meta);
 
     const openButton = document.createElement("button");
@@ -2770,6 +2863,17 @@ function formatYearLabel(year) {
   return String(year);
 }
 
+function formatDonorTypeLabel(type) {
+  if (typeof type !== "string") {
+    return "Unspecified";
+  }
+  const normalized = type.trim().toLowerCase();
+  if (DONOR_TYPE_LABELS[normalized]) {
+    return DONOR_TYPE_LABELS[normalized];
+  }
+  return "Unspecified";
+}
+
 function pluralize(value, singular, plural) {
   const number = Number(value) || 0;
   if (number === 1) return singular;
@@ -2811,6 +2915,7 @@ function normalizeSearchFilters(filters = {}) {
   let minAmount = Number.isFinite(filters.minAmount) && filters.minAmount >= 0 ? Number(filters.minAmount) : null;
   let maxAmount = Number.isFinite(filters.maxAmount) && filters.maxAmount >= 0 ? Number(filters.maxAmount) : null;
   const year = Number.isFinite(filters.year) && filters.year > 0 ? Math.trunc(filters.year) : null;
+  const donorType = normalizeDonorTypeFilter(filters.donorType);
 
   if (amount !== null) {
     minAmount = null;
@@ -2823,7 +2928,18 @@ function normalizeSearchFilters(filters = {}) {
     maxAmount = temp;
   }
 
-  return { amount, minAmount, maxAmount, year };
+  return { amount, minAmount, maxAmount, year, donorType };
+}
+
+function normalizeDonorTypeFilter(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  return ALL_DONOR_TYPES.includes(normalized) ? normalized : null;
 }
 
 async function loadCandidateInsights(candidate, { reset = false, preserveExisting = false } = {}) {
@@ -2860,6 +2976,7 @@ async function loadCandidateInsights(candidate, { reset = false, preserveExistin
         totals: result.totals || { totalAmount: 0, donorCount: 0, contributionCount: 0 },
         years: Array.isArray(result.years) ? result.years : [],
         donors: Array.isArray(result.donors) ? result.donors : [],
+        categories: Array.isArray(result.categories) ? result.categories : [],
       };
       insights.candidate = insights.candidateReport.candidate || trimmed;
       insights.candidateKey = insights.candidate.toLowerCase();
@@ -2884,7 +3001,8 @@ async function runGivingSearch({ filters, preserveExisting = false } = {}) {
     normalized.amount === null &&
     normalized.minAmount === null &&
     normalized.maxAmount === null &&
-    normalized.year === null
+    normalized.year === null &&
+    normalized.donorType === null
   ) {
     return;
   }
@@ -2911,6 +3029,9 @@ async function runGivingSearch({ filters, preserveExisting = false } = {}) {
         params.set("maxAmount", String(normalized.maxAmount));
       }
     }
+    if (normalized.donorType) {
+      params.set("donorType", normalized.donorType);
+    }
     const query = params.toString();
     const url = query ? `/api/giving/search?${query}` : "/api/giving/search";
     const response = await fetchJson(url);
@@ -2919,6 +3040,7 @@ async function runGivingSearch({ filters, preserveExisting = false } = {}) {
         totals: response.totals || { totalAmount: 0, donorCount: 0, contributionCount: 0 },
         years: Array.isArray(response.years) ? response.years : [],
         donors: Array.isArray(response.donors) ? response.donors : [],
+        categories: Array.isArray(response.categories) ? response.categories : [],
         filters: response.filters || {},
       };
       insights.lastExecutedFilters = {
@@ -2926,6 +3048,7 @@ async function runGivingSearch({ filters, preserveExisting = false } = {}) {
         minAmount: normalized.amount !== null ? null : normalized.minAmount,
         maxAmount: normalized.amount !== null ? null : normalized.maxAmount,
         year: normalized.year,
+        donorType: normalized.donorType,
       };
     } else {
       insights.searchResults = null;
@@ -2940,17 +3063,19 @@ async function runGivingSearch({ filters, preserveExisting = false } = {}) {
 }
 
 function getSearchFiltersFromState() {
-  const { amount, minAmount, maxAmount, year } = state.givingInsights.searchFilters;
+  const { amount, minAmount, maxAmount, year, donorType } = state.givingInsights.searchFilters;
   const exact = parseSearchAmountValue(amount);
   const min = parseSearchAmountValue(minAmount);
   const max = parseSearchAmountValue(maxAmount);
   const yearValue = parseSearchYearValue(year);
+  const normalizedType = normalizeDonorTypeFilter(donorType);
 
   const filters = {
     amount: exact.value,
     minAmount: exact.value !== null ? null : min.value,
     maxAmount: exact.value !== null ? null : max.value,
     year: yearValue.value,
+    donorType: normalizedType,
   };
 
   return normalizeSearchFilters(filters);
@@ -2962,12 +3087,15 @@ function handleGivingSearchSubmit(form) {
   const minAmount = parseSearchAmountValue(data.get("minAmount"));
   const maxAmount = parseSearchAmountValue(data.get("maxAmount"));
   const year = parseSearchYearValue(data.get("year"));
+  const donorTypeRaw = typeof data.get("donorType") === "string" ? data.get("donorType") : "";
+  const donorType = normalizeDonorTypeFilter(donorTypeRaw);
 
   state.givingInsights.searchFilters = {
     amount: amount.text,
     minAmount: amount.value !== null ? "" : minAmount.text,
     maxAmount: amount.value !== null ? "" : maxAmount.text,
     year: year.text,
+    donorType: donorType || "",
   };
 
   state.givingInsights.searchError = null;
@@ -2977,12 +3105,19 @@ function handleGivingSearchSubmit(form) {
     minAmount: amount.value !== null ? null : minAmount.value,
     maxAmount: amount.value !== null ? null : maxAmount.value,
     year: year.value,
+    donorType,
   });
 
-  if (filters.amount === null && filters.minAmount === null && filters.maxAmount === null && filters.year === null) {
+  if (
+    filters.amount === null &&
+    filters.minAmount === null &&
+    filters.maxAmount === null &&
+    filters.year === null &&
+    filters.donorType === null
+  ) {
     state.givingInsights.searchResults = null;
     state.givingInsights.lastExecutedFilters = null;
-    state.givingInsights.searchError = "Enter an amount or year to search.";
+    state.givingInsights.searchError = "Enter an amount, year, or donor type to search.";
     renderGivingInsights();
     return;
   }
