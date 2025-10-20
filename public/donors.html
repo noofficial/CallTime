@@ -27,6 +27,7 @@
           <div class="database-header__actions">
             <a class="btn btn--ghost" href="index.html">Back to workspace</a>
             <a class="btn btn--outline" href="contributions.html">Contribution dashboard</a>
+            <a class="btn btn--outline" href="contribution-search.html">Contribution search</a>
             <a class="btn" id="export-donors" href="#">Export JSON</a>
             <button class="btn btn--ghost" type="button" id="open-giving-insights">Giving insights</button>
             <button class="btn btn--primary" type="button" id="open-donor-modal">New donor</button>
@@ -181,12 +182,22 @@
                     database.
                   </p>
                 </div>
-                <ul class="database-list hidden" id="database-results-list" role="list"></ul>
-                <div class="database-detail__empty hidden" id="database-detail-empty">
-                  <h2>Select a donor</h2>
-                  <p>Choose a donor from the results to see their profile and manage focus assignments.</p>
+                <div class="database-results__layout hidden" id="database-results-layout">
+                  <div class="database-results__column database-results__column--list">
+                    <ul
+                      class="database-list database-results__list hidden"
+                      id="database-results-list"
+                      role="list"
+                    ></ul>
+                  </div>
+                  <div class="database-results__column database-results__column--detail">
+                    <div class="database-detail__empty hidden" id="database-detail-empty">
+                      <h2>Select a donor</h2>
+                      <p>Choose a donor from the results to see their profile and manage focus assignments.</p>
+                    </div>
+                    <div id="database-detail" class="database-detail__panel"></div>
+                  </div>
                 </div>
-                <div id="database-detail" class="database-detail__panel"></div>
               </div>
             </div>
           </section>

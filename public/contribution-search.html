@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Contribution Search · CallTime Desk</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body class="workspace workspace--manager contribution-search-page">
+    <header class="dashboard-header">
+      <div class="container">
+        <div class="header-content">
+          <div>
+            <p class="eyebrow">CallTime Desk</p>
+            <h1>Contribution search</h1>
+            <p class="muted">
+              Locate recorded donations by selecting a candidate and year, then review donor details in one place.
+            </p>
+          </div>
+          <nav class="header-actions">
+            <a class="btn btn--ghost" href="index.html">Back to workspace</a>
+            <a class="btn btn--outline" href="contributions.html">Contribution dashboard</a>
+            <a class="btn btn--outline" href="donors.html">Donor database</a>
+          </nav>
+        </div>
+      </div>
+    </header>
+
+    <main class="container contribution-search__layout">
+      <section class="card contribution-search__panel" aria-labelledby="contribution-search-title">
+        <div class="card__header">
+          <div>
+            <h2 id="contribution-search-title">Search filters</h2>
+            <p class="muted">Choose a candidate and year to find matching contributions.</p>
+          </div>
+        </div>
+        <div class="card__body">
+          <form class="contribution-search__form" id="contribution-search-form" novalidate>
+            <div class="form-grid contribution-search__form-grid">
+              <div class="form-row">
+                <label class="form-label" for="contribution-search-candidate">Candidate</label>
+                <select class="input select" id="contribution-search-candidate" name="candidate">
+                  <option value="" selected>Any candidate</option>
+                </select>
+                <p class="muted form-help">Candidates are populated from recorded contributions.</p>
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="contribution-search-year">Year</label>
+                <select class="input select" id="contribution-search-year" name="year">
+                  <option value="" selected>Any year</option>
+                </select>
+              </div>
+            </div>
+            <div class="contribution-search__actions">
+              <button class="btn btn--primary" type="submit">Search contributions</button>
+              <button class="btn btn--ghost" type="button" id="contribution-search-reset">Reset</button>
+            </div>
+          </form>
+          <p class="contribution-search__status muted" id="contribution-search-status" role="status"></p>
+        </div>
+      </section>
+
+      <section class="card contribution-search__panel contribution-search__panel--results" aria-live="polite">
+        <div class="card__header contribution-search__results-header">
+          <div>
+            <h2>Results</h2>
+            <p class="muted">Summary of contributions that match the current filters.</p>
+          </div>
+          <div class="contribution-search__summary" id="contribution-search-summary">
+            <div class="summary-stat">
+              <span class="summary-stat__label">Total raised</span>
+              <span class="summary-stat__value" id="contribution-search-total">$0</span>
+            </div>
+            <div class="summary-stat">
+              <span class="summary-stat__label">Contributions</span>
+              <span class="summary-stat__value" id="contribution-search-count">0</span>
+            </div>
+            <div class="summary-stat">
+              <span class="summary-stat__label">Donors</span>
+              <span class="summary-stat__value" id="contribution-search-donors">0</span>
+            </div>
+          </div>
+        </div>
+        <div class="card__body contribution-search__results">
+          <div class="contribution-search__empty" id="contribution-search-empty">
+            <p>Run a search to see contributions organized by donor.</p>
+          </div>
+          <div class="contribution-search__list hidden" id="contribution-search-list"></div>
+          <div class="contribution-search__years hidden" id="contribution-search-years"></div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container">
+        <p>
+          Proprietary software created and used by Silver Basin Strategies. Unauthorized or unapproved distribution of
+          any data from this system is prohibited.
+        </p>
+      </div>
+    </footer>
+
+    <script type="module" src="contribution-search.js"></script>
+  </body>
+</html>

@@ -4230,12 +4230,40 @@ app.get('/api/giving/candidates/:candidate/summary', authenticateManager, (req, 
     }
 })
 
+app.get('/api/giving/filters', authenticateManager, (req, res) => {
+    try {
+        const candidateRows = db
+            .prepare(
+                `SELECT DISTINCT TRIM(candidate) AS candidate FROM giving_history WHERE candidate IS NOT NULL AND TRIM(candidate) <> '' ORDER BY candidate COLLATE NOCASE`,
+            )
+            .all()
+        const yearRows = db
+            .prepare(`SELECT DISTINCT year FROM giving_history WHERE year IS NOT NULL ORDER BY year DESC`)
+            .all()
+
+        const candidates = candidateRows
+            .map((row) => cleanString(row?.candidate))
+            .filter((value) => Boolean(value))
+        const years = yearRows
+            .map((row) => {
+                const numeric = Number(row?.year)
+                return Number.isFinite(numeric) ? numeric : null
+            })
+            .filter((value) => value !== null)
+
+        res.json({ candidates, years })
+    } catch (error) {
+        res.status(500).json({ error: error.message })
+    }
+})
+
 app.get('/api/giving/search', authenticateManager, (req, res) => {
     const year = parseInteger(req.query.year)
     const amount = parseNonNegativeNumber(req.query.amount)
     let minAmount = parseNonNegativeNumber(req.query.minAmount)
     let maxAmount = parseNonNegativeNumber(req.query.maxAmount)
     const donorType = normalizeDonorTypeValue(req.query.donorType)
+    const candidate = cleanString(req.query.candidate)
 
     if (amount !== null) {
         minAmount = null
@@ -4246,8 +4274,17 @@ app.get('/api/giving/search', authenticateManager, (req, res) => {
         maxAmount = temp
     }
 
-    if (year === null && amount === null && minAmount === null && maxAmount === null && !donorType) {
-        return res.status(400).json({ error: 'Provide at least one search filter (year, amount, or donor type).' })
+    if (
+        year === null &&
+        amount === null &&
+        minAmount === null &&
+        maxAmount === null &&
+        !donorType &&
+        !candidate
+    ) {
+        return res
+            .status(400)
+            .json({ error: 'Provide at least one search filter (year, candidate, amount, or donor type).' })
     }
 
     const filters = []
@@ -4274,6 +4311,10 @@ app.get('/api/giving/search', authenticateManager, (req, res) => {
         filters.push('d.donor_type = ?')
         params.push(donorType)
     }
+    if (candidate) {
+        filters.push('LOWER(TRIM(gh.candidate)) = LOWER(TRIM(?))')
+        params.push(candidate)
+    }
 
     const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : ''
 
@@ -4296,6 +4337,7 @@ app.get('/api/giving/search', authenticateManager, (req, res) => {
                 minAmount: amount !== null ? null : minAmount,
                 maxAmount: amount !== null ? null : maxAmount,
                 donorType,
+                candidate,
             },
             totals: summary.totals,
             years: summary.years,
