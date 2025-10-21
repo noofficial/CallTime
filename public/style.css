@@ -2464,7 +2464,7 @@ body.modal-open {
 
 @media (min-width: 1024px) {
   .contribution-search__layout {
-    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+    grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
     align-items: start;
   }
 }
