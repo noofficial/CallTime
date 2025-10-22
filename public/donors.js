@@ -1249,7 +1249,7 @@ function createIdentitySection(draft) {
     ? draft.values.donorType
     : DONOR_TYPE.INDIVIDUAL;
   const organizationRequired = ORGANIZATION_DONOR_TYPES.has(donorTypeValue);
-  grid.append(
+  const identityFields = [
     createSelectField("inline-donor-type", "donorType", "Donor type", donorTypeValue, [
       { value: DONOR_TYPE.INDIVIDUAL, label: "Individual" },
       { value: DONOR_TYPE.BUSINESS, label: "Business / Organization" },
@@ -1300,7 +1300,7 @@ function createIdentitySection(draft) {
         identityGroup: "organization-contact",
         hidden: !organizationRequired,
       },
-    }),
+    ),
     createInputField("inline-email", "email", "Email", draft.values.email, {
       type: "email",
       autocomplete: "email",
@@ -1338,7 +1338,13 @@ function createIdentitySection(draft) {
     createInputField("inline-postal-code", "postalCode", "Postal code", draft.values.postalCode, {
       autocomplete: "postal-code",
     }),
-  );
+  ];
+
+  identityFields.forEach((field) => {
+    if (field) {
+      grid.append(field);
+    }
+  });
   section.append(grid);
   return section;
 }
@@ -1352,7 +1358,7 @@ function createGivingSection(draft) {
 
   const grid = document.createElement("div");
   grid.className = "form-grid";
-  grid.append(
+  const givingFields = [
     createInputField("inline-company", "company", "Company", draft.values.company),
     createInputField("inline-title", "title", "Title / Occupation", draft.values.title),
     createInputField("inline-industry", "industry", "Industry", draft.values.industry),
@@ -1369,7 +1375,13 @@ function createGivingSection(draft) {
       type: "url",
       placeholder: "https://…",
     }),
-  );
+  ];
+
+  givingFields.forEach((field) => {
+    if (field) {
+      grid.append(field);
+    }
+  });
   section.append(grid);
   return section;
 }
@@ -2736,7 +2748,7 @@ function createGivingSearchForm() {
 
   const grid = document.createElement("div");
   grid.className = "insights-search__grid";
-  grid.append(
+  const searchFields = [
     createSearchField("Exact amount", "amount", searchFilters.amount, { step: "any", min: "0", placeholder: "250" }),
     createSearchField(
       "Minimum amount",
@@ -2759,7 +2771,13 @@ function createGivingSearchForm() {
         { value: DONOR_TYPE.CAMPAIGN, label: DONOR_TYPE_LABELS[DONOR_TYPE.CAMPAIGN] },
       ],
     }),
-  );
+  ];
+
+  searchFields.forEach((field) => {
+    if (field) {
+      grid.append(field);
+    }
+  });
   form.append(grid);
 
   const actions = document.createElement("div");
