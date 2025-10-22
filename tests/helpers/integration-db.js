@@ -86,6 +86,16 @@ function ensureIntegrationDatabase() {
       call_duration INTEGER,
       call_quality INTEGER
     );
+    CREATE TABLE IF NOT EXISTS giving_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      donor_id INTEGER NOT NULL,
+      year INTEGER NOT NULL,
+      candidate TEXT NOT NULL,
+      office_sought TEXT,
+      amount REAL NOT NULL,
+      is_inkind INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS client_donor_research (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       client_id INTEGER NOT NULL,

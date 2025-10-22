@@ -25,6 +25,7 @@ const elements = {
   historyYear: document.getElementById("history-year"),
   historyCandidate: document.getElementById("history-candidate"),
   historyOffice: document.getElementById("history-office"),
+  historyType: document.getElementById("history-type"),
   historyAmount: document.getElementById("history-amount"),
   addHistory: document.getElementById("add-history"),
 };
@@ -114,6 +115,7 @@ function resetEditorState() {
   if (elements.historyYear) elements.historyYear.value = "";
   if (elements.historyCandidate) elements.historyCandidate.value = "";
   if (elements.historyOffice) elements.historyOffice.value = "";
+  if (elements.historyType) elements.historyType.value = "monetary";
   if (elements.historyAmount) elements.historyAmount.value = "";
 }
 
@@ -249,6 +251,8 @@ function handleAddHistory() {
   const yearValue = parseInt(elements.historyYear.value, 10);
   const candidate = elements.historyCandidate.value.trim();
   const office = elements.historyOffice ? elements.historyOffice.value.trim() : "";
+  const typeValue = elements.historyType ? elements.historyType.value : "monetary";
+  const isInKind = String(typeValue).toLowerCase() === "inkind";
   const amountValue = parseNumber(elements.historyAmount.value);
   if (!candidate && Number.isNaN(yearValue) && amountValue === null) {
     return;
@@ -259,6 +263,7 @@ function handleAddHistory() {
     candidate,
     officeSought: office,
     amount: amountValue,
+    isInKind,
   };
   state.history.push(entry);
   sortHistory();
@@ -266,6 +271,7 @@ function handleAddHistory() {
   elements.historyYear.value = "";
   elements.historyCandidate.value = "";
   if (elements.historyOffice) elements.historyOffice.value = "";
+  if (elements.historyType) elements.historyType.value = "monetary";
   elements.historyAmount.value = "";
   elements.historyYear.focus();
 }
@@ -488,7 +494,8 @@ function renderHistory() {
   const table = document.createElement("table");
   table.className = "editor-history";
   const head = document.createElement("thead");
-  head.innerHTML = "<tr><th>Year</th><th>Candidate</th><th>Office sought</th><th>Amount</th><th></th></tr>";
+  head.innerHTML =
+    "<tr><th>Year</th><th>Candidate</th><th>Office sought</th><th>Type</th><th>Amount</th><th></th></tr>";
   table.append(head);
   const body = document.createElement("tbody");
   state.history.forEach((entry) => {
@@ -499,11 +506,19 @@ function renderHistory() {
     candidateCell.textContent = entry.candidate || "—";
     const officeCell = document.createElement("td");
     officeCell.textContent = entry.officeSought || "—";
+    const typeCell = document.createElement("td");
     const amountCell = document.createElement("td");
     amountCell.textContent =
       entry.amount === null || entry.amount === undefined
         ? "—"
         : `$${formatCurrency(entry.amount)}`;
+    if (entry.isInKind) {
+      typeCell.textContent = "In-kind";
+      typeCell.classList.add("editor-history__type--inkind");
+      amountCell.classList.add("editor-history__amount--inkind");
+    } else {
+      typeCell.textContent = "Monetary";
+    }
     const actionsCell = document.createElement("td");
     actionsCell.className = "editor-history__actions";
     const removeButton = document.createElement("button");
@@ -512,7 +527,7 @@ function renderHistory() {
     removeButton.setAttribute("data-remove-history", entry.id);
     removeButton.textContent = "Remove";
     actionsCell.append(removeButton);
-    row.append(yearCell, candidateCell, officeCell, amountCell, actionsCell);
+    row.append(yearCell, candidateCell, officeCell, typeCell, amountCell, actionsCell);
     body.append(row);
   });
   table.append(body);

@@ -267,7 +267,7 @@ const CONTRIBUTION_PREFIXES = [
     'history',
 ]
 const CONTRIBUTION_FIELD_PATTERN = new RegExp(
-    `^(?:${CONTRIBUTION_PREFIXES.join('|')})(\\d*)(year|candidate|amount|office|officesought)$`
+    `^(?:${CONTRIBUTION_PREFIXES.join('|')})(\\d*)(year|candidate|amount|office|officesought|inkind)$`
 )
 
 const identifyContributionField = (normalizedKey) => {
@@ -610,6 +610,12 @@ const transformContributionRows = (rows = []) => {
         const candidate = cleanString(row.candidate)
         const amount = parseCurrency(row.amount)
         const officeSought = cleanString(row.office ?? row.office_sought ?? row.officeSought)
+        const isInKind = Boolean(
+            parseBooleanFlag(
+                row.inkind ?? row.is_inkind ?? row.in_kind ?? row.type ?? row.contribution_type,
+                { defaultValue: false }
+            )
+        )
 
         if (year === null && !candidate && amount === null) {
             return
@@ -624,7 +630,7 @@ const transformContributionRows = (rows = []) => {
             return
         }
 
-        entries.push({ year, candidate, amount, officeSought })
+        entries.push({ year, candidate, amount, officeSought, isInKind })
     })
 
     return { entries, errors }
@@ -1105,6 +1111,7 @@ const GIVING_HISTORY_TABLE_COLUMNS_SQL = `
     candidate TEXT NOT NULL,
     office_sought TEXT,
     amount REAL NOT NULL,
+    is_inkind INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(donor_id) REFERENCES donors(id) ON DELETE CASCADE
 `
@@ -1207,6 +1214,7 @@ const GIVING_HISTORY_COLUMN_ORDER = [
     'candidate',
     'office_sought',
     'amount',
+    'is_inkind',
     'created_at',
 ]
 
@@ -1984,6 +1992,7 @@ ${DONORS_TABLE_COLUMNS_SQL}
                 candidate TEXT NOT NULL,
                 office_sought TEXT,
                 amount REAL NOT NULL,
+                is_inkind INTEGER NOT NULL DEFAULT 0,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(donor_id) REFERENCES donors(id) ON DELETE CASCADE
             );
@@ -2063,6 +2072,7 @@ ${DONORS_TABLE_COLUMNS_SQL}
         ensureColumn('clients', 'portal_password', 'portal_password TEXT')
         ensureColumn('clients', 'portal_password_needs_reset', 'portal_password_needs_reset INTEGER DEFAULT 0')
         ensureColumn('giving_history', 'office_sought', 'office_sought TEXT')
+        ensureColumn('giving_history', 'is_inkind', 'is_inkind INTEGER NOT NULL DEFAULT 0')
         ensureColumn('donor_assignments', 'priority_level', 'priority_level INTEGER DEFAULT 1')
         ensureColumn('donor_assignments', 'is_active', 'is_active BOOLEAN DEFAULT 1')
         ensureColumn('donor_assignments', 'assigned_by', 'assigned_by TEXT')
@@ -2689,12 +2699,13 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
             SELECT id FROM giving_history
             WHERE donor_id = ? AND year = ? AND candidate = ? AND amount = ?
               AND COALESCE(office_sought, '') = COALESCE(?, '')
+              AND is_inkind = ?
             LIMIT 1
         `)
 
         const insertContributionStmt = db.prepare(`
-            INSERT INTO giving_history (donor_id, year, candidate, office_sought, amount)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO giving_history (donor_id, year, candidate, office_sought, amount, is_inkind)
+            VALUES (?, ?, ?, ?, ?, ?)
         `)
 
         const applyRows = db.transaction((entries) => {
@@ -2743,7 +2754,8 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
                     const seenContributions = new Set()
                     contributionResult.entries.forEach((entry) => {
                         const officeKey = entry.officeSought ? entry.officeSought.toLowerCase() : ''
-                        const key = `${entry.year}|${entry.candidate.toLowerCase()}|${entry.amount}|${officeKey}`
+                        const typeKey = entry.isInKind ? 'inkind' : 'monetary'
+                        const key = `${entry.year}|${entry.candidate.toLowerCase()}|${entry.amount}|${officeKey}|${typeKey}`
                         if (seenContributions.has(key)) {
                             summary.contributionsSkipped += 1
                             return
@@ -2755,7 +2767,8 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
                             entry.year,
                             entry.candidate,
                             entry.amount,
-                            entry.officeSought || null
+                            entry.officeSought || null,
+                            entry.isInKind ? 1 : 0
                         )
                         if (existingContribution) {
                             summary.contributionsSkipped += 1
@@ -2767,7 +2780,8 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
                             entry.year,
                             entry.candidate,
                             entry.officeSought || null,
-                            entry.amount
+                            entry.amount,
+                            entry.isInKind ? 1 : 0
                         )
                         summary.contributionsAdded += 1
                     })
@@ -3745,8 +3759,8 @@ app.post('/api/donors', authenticateManager, (req, res) => {
         const historyEntries = Array.isArray(payload.history) ? payload.history : []
         if (historyEntries.length) {
             const historyStmt = db.prepare(`
-                INSERT INTO giving_history (donor_id, year, candidate, office_sought, amount)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO giving_history (donor_id, year, candidate, office_sought, amount, is_inkind)
+                VALUES (?, ?, ?, ?, ?, ?)
             `)
             const historyTransaction = db.transaction((entries) => {
                 entries.forEach((entry) => {
@@ -3757,10 +3771,23 @@ app.post('/api/donors', authenticateManager, (req, res) => {
                     const amount = entry.amount === null || entry.amount === undefined || entry.amount === ''
                         ? null
                         : Number(entry.amount)
+                    const isInKind = Boolean(
+                        parseBooleanFlag(
+                            entry.isInKind ?? entry.is_inkind ?? entry.inkind ?? entry.isInkind,
+                            { defaultValue: false }
+                        )
+                    )
                     if (!candidate || Number.isNaN(year) || amount === null || Number.isNaN(amount)) {
                         return
                     }
-                    historyStmt.run(donorId, year, candidate, officeSought || null, amount)
+                    historyStmt.run(
+                        donorId,
+                        year,
+                        candidate,
+                        officeSought || null,
+                        amount,
+                        isInKind ? 1 : 0
+                    )
                 })
             })
             historyTransaction(historyEntries)
@@ -4196,6 +4223,9 @@ function buildGivingSummary(rows = []) {
         const candidate = row.candidate || null
         const officeSought = row.office_sought || row.officeSought || null
         const donorType = normalizeDonorTypeValue(row.donor_type) || 'individual'
+        const rawIsInKind =
+            row.isInKind ?? row.is_inkind ?? row.inkind ?? row.isInkind ?? row.contribution_type
+        const isInKind = Boolean(parseBooleanFlag(rawIsInKind, { defaultValue: false }))
 
         contributionCount += 1
         totalAmount += amount
@@ -4208,7 +4238,7 @@ function buildGivingSummary(rows = []) {
                     totalAmount: 0,
                     contributionCount: 0,
                     donorType,
-                    contributions: []
+                    contributions: [],
                 })
             }
             const donorEntry = donors.get(donorId)
@@ -4221,7 +4251,8 @@ function buildGivingSummary(rows = []) {
                 amount,
                 candidate,
                 officeSought,
-                createdAt: row.created_at || null
+                createdAt: row.created_at || null,
+                isInKind,
             })
         }
 
@@ -4340,7 +4371,7 @@ app.get('/api/giving/candidates/:candidate/summary', authenticateManager, (req, 
 
     try {
         const contributions = db.prepare(`
-            SELECT gh.id, gh.donor_id, gh.year, gh.candidate, gh.office_sought, gh.amount, gh.created_at,
+            SELECT gh.id, gh.donor_id, gh.year, gh.candidate, gh.office_sought, gh.amount, gh.is_inkind, gh.created_at,
                    d.name AS donor_name, d.donor_type AS donor_type
             FROM giving_history gh
             JOIN donors d ON d.id = gh.donor_id
@@ -4454,7 +4485,7 @@ app.get('/api/giving/search', authenticateManager, (req, res) => {
 
     try {
         const contributions = db.prepare(`
-            SELECT gh.id, gh.donor_id, gh.year, gh.candidate, gh.office_sought, gh.amount, gh.created_at,
+            SELECT gh.id, gh.donor_id, gh.year, gh.candidate, gh.office_sought, gh.amount, gh.is_inkind, gh.created_at,
                    d.name AS donor_name, d.donor_type AS donor_type
             FROM giving_history gh
             JOIN donors d ON d.id = gh.donor_id
@@ -4496,16 +4527,28 @@ app.post('/api/donors/:donorId/giving', authenticateManager, (req, res) => {
     const yearValue = Number.parseInt(year, 10)
     const candidateName = cleanString(candidate)
     const amountValue = Number(amount)
+    const isInKind = Boolean(
+        parseBooleanFlag(req.body?.isInKind ?? req.body?.inkind ?? req.body?.is_inkind, {
+            defaultValue: false,
+        })
+    )
     if (!Number.isInteger(yearValue) || !candidateName || !Number.isFinite(amountValue)) {
         return res.status(400).json({ error: 'year, candidate, amount required' })
     }
 
     try {
         const stmt = db.prepare(`
-            INSERT INTO giving_history(donor_id, year, candidate, office_sought, amount)
-            VALUES (?,?,?,?,?)
+            INSERT INTO giving_history(donor_id, year, candidate, office_sought, amount, is_inkind)
+            VALUES (?,?,?,?,?,?)
         `)
-        const result = stmt.run(req.params.donorId, yearValue, candidateName, officeSought, amountValue)
+        const result = stmt.run(
+            req.params.donorId,
+            yearValue,
+            candidateName,
+            officeSought,
+            amountValue,
+            isInKind ? 1 : 0
+        )
         res.json({ id: result.lastInsertRowid })
     } catch (error) {
         res.status(500).json({ error: error.message })
@@ -4519,6 +4562,11 @@ app.patch('/api/donors/:donorId/giving/:entryId', authenticateManager, (req, res
     const yearValue = Number.parseInt(year, 10)
     const candidateName = cleanString(candidate)
     const amountValue = Number(amount)
+    const isInKind = Boolean(
+        parseBooleanFlag(req.body?.isInKind ?? req.body?.inkind ?? req.body?.is_inkind, {
+            defaultValue: false,
+        })
+    )
     if (!Number.isInteger(yearValue) || !candidateName || !Number.isFinite(amountValue)) {
         return res.status(400).json({ error: 'year, candidate, amount required' })
     }
@@ -4531,10 +4579,10 @@ app.patch('/api/donors/:donorId/giving/:entryId', authenticateManager, (req, res
 
         const stmt = db.prepare(`
             UPDATE giving_history
-            SET year = ?, candidate = ?, office_sought = ?, amount = ?
+            SET year = ?, candidate = ?, office_sought = ?, amount = ?, is_inkind = ?
             WHERE id = ? AND donor_id = ?
         `)
-        stmt.run(yearValue, candidateName, officeSought, amountValue, entryId, donorId)
+        stmt.run(yearValue, candidateName, officeSought, amountValue, isInKind ? 1 : 0, entryId, donorId)
         res.json({ success: true })
     } catch (error) {
         res.status(500).json({ error: error.message })

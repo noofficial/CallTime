@@ -752,6 +752,7 @@ function normalizeDonorDetail(detail) {
         officeSought: entry.officeSought || entry.office_sought || "",
         amount: entry.amount,
         createdAt: entry.createdAt || entry.created_at || null,
+        isInKind: Boolean(entry.isInKind ?? entry.is_inkind ?? entry.inkind),
       }))
     : [];
   history.sort((a, b) => {
@@ -1150,6 +1151,7 @@ function createDraftFromDonor(donor) {
         officeSought: entry.officeSought || "",
         amount: entry.amount,
         createdAt: entry.createdAt || null,
+        isInKind: Boolean(entry.isInKind ?? entry.is_inkind ?? entry.inkind),
       }))
     : [];
   sortHistory(history);
@@ -2009,6 +2011,18 @@ function createHistorySection(donor) {
   officeInput.id = "inline-history-office";
   officeInput.name = "historyOffice";
   officeInput.placeholder = "Office sought";
+  const typeSelect = document.createElement("select");
+  typeSelect.className = "input";
+  typeSelect.id = "inline-history-type";
+  typeSelect.name = "historyType";
+  const typeMonetary = document.createElement("option");
+  typeMonetary.value = "monetary";
+  typeMonetary.textContent = "Monetary";
+  const typeInKind = document.createElement("option");
+  typeInKind.value = "inkind";
+  typeInKind.textContent = "In-kind";
+  typeSelect.append(typeMonetary, typeInKind);
+  typeSelect.value = "monetary";
   const amountInput = document.createElement("input");
   amountInput.className = "input";
   amountInput.type = "number";
@@ -2022,10 +2036,10 @@ function createHistorySection(donor) {
   addButton.className = "btn";
   addButton.textContent = "Add";
   addButton.addEventListener("click", () => {
-    void addHistoryEntry(donor.id, yearInput, candidateInput, officeInput, amountInput);
+    void addHistoryEntry(donor.id, yearInput, candidateInput, officeInput, typeSelect, amountInput);
   });
 
-  formRow.append(yearInput, candidateInput, officeInput, amountInput, addButton);
+  formRow.append(yearInput, candidateInput, officeInput, typeSelect, amountInput, addButton);
   section.append(formRow);
 
   const list = document.createElement("div");
@@ -2048,8 +2062,17 @@ function createHistorySection(donor) {
       const yearInput = row.querySelector("[data-history-year]");
       const candidateInput = row.querySelector("[data-history-candidate]");
       const officeInput = row.querySelector("[data-history-office]");
+      const typeInput = row.querySelector("[data-history-type]");
       const amountInput = row.querySelector("[data-history-amount]");
-      void updateHistoryEntry(donor.id, entryId, yearInput, candidateInput, officeInput, amountInput);
+      void updateHistoryEntry(
+        donor.id,
+        entryId,
+        yearInput,
+        candidateInput,
+        officeInput,
+        typeInput,
+        amountInput,
+      );
       return;
     }
     const cancelButton = event.target.closest("[data-cancel-history-edit]");
@@ -2090,7 +2113,8 @@ function renderHistoryItems(container, history = []) {
   const table = document.createElement("table");
   table.className = "donor-history";
   const head = document.createElement("thead");
-  head.innerHTML = "<tr><th>Year</th><th>Candidate</th><th>Office sought</th><th>Amount</th><th></th></tr>";
+  head.innerHTML =
+    "<tr><th>Year</th><th>Candidate</th><th>Office sought</th><th>Type</th><th>Amount</th><th></th></tr>";
   table.append(head);
   const body = document.createElement("tbody");
   const editingId =
@@ -2104,6 +2128,7 @@ function renderHistoryItems(container, history = []) {
     const yearCell = document.createElement("td");
     const candidateCell = document.createElement("td");
     const officeCell = document.createElement("td");
+    const typeCell = document.createElement("td");
     const amountCell = document.createElement("td");
     const actionsCell = document.createElement("td");
     actionsCell.className = "donor-history__actions";
@@ -2132,6 +2157,19 @@ function renderHistoryItems(container, history = []) {
       officeInput.value = entry.officeSought || entry.office_sought || "";
       officeInput.setAttribute("data-history-office", entry.id);
       officeCell.append(officeInput);
+
+      const typeSelect = document.createElement("select");
+      typeSelect.className = "input";
+      typeSelect.setAttribute("data-history-type", entry.id);
+      const monetaryOption = document.createElement("option");
+      monetaryOption.value = "monetary";
+      monetaryOption.textContent = "Monetary";
+      const inKindOption = document.createElement("option");
+      inKindOption.value = "inkind";
+      inKindOption.textContent = "In-kind";
+      typeSelect.append(monetaryOption, inKindOption);
+      typeSelect.value = entry.isInKind ? "inkind" : "monetary";
+      typeCell.append(typeSelect);
 
       const amountInput = document.createElement("input");
       amountInput.type = "number";
@@ -2171,10 +2209,17 @@ function renderHistoryItems(container, history = []) {
       }
       const officeValue = entry.officeSought || entry.office_sought || "";
       officeCell.textContent = officeValue || "—";
+      typeCell.textContent = entry.isInKind ? "In-kind" : "Monetary";
+      if (entry.isInKind) {
+        typeCell.classList.add("donor-history__type--inkind");
+      }
       amountCell.textContent =
         entry.amount === null || entry.amount === undefined
           ? "—"
           : `$${formatCurrency(entry.amount)}`;
+      if (entry.isInKind) {
+        amountCell.classList.add("donor-history__amount--inkind");
+      }
 
       const editButton = document.createElement("button");
       editButton.type = "button";
@@ -2191,17 +2236,19 @@ function renderHistoryItems(container, history = []) {
       actionsCell.append(editButton, removeButton);
     }
 
-    row.append(yearCell, candidateCell, officeCell, amountCell, actionsCell);
+    row.append(yearCell, candidateCell, officeCell, typeCell, amountCell, actionsCell);
     body.append(row);
   });
   table.append(body);
   container.append(table);
 }
 
-async function addHistoryEntry(donorId, yearInput, candidateInput, officeInput, amountInput) {
+async function addHistoryEntry(donorId, yearInput, candidateInput, officeInput, typeInput, amountInput) {
   const yearValue = parseInt(yearInput.value, 10);
   const candidate = candidateInput.value.trim();
   const office = officeInput ? officeInput.value.trim() : "";
+  const typeValue = typeInput ? typeInput.value : "monetary";
+  const isInKind = String(typeValue).toLowerCase() === "inkind";
   const amountValue = parseNumber(amountInput.value);
   if (Number.isNaN(yearValue) || !candidate || amountValue === null) {
     return;
@@ -2212,6 +2259,7 @@ async function addHistoryEntry(donorId, yearInput, candidateInput, officeInput, 
       candidate,
       officeSought: office || undefined,
       amount: amountValue,
+      isInKind,
     };
     await fetchJson(`/api/donors/${donorId}/giving`, {
       method: "POST",
@@ -2221,6 +2269,7 @@ async function addHistoryEntry(donorId, yearInput, candidateInput, officeInput, 
     yearInput.value = "";
     candidateInput.value = "";
     if (officeInput) officeInput.value = "";
+    if (typeInput) typeInput.value = "monetary";
     amountInput.value = "";
     await refreshData({ donorId, preserveDraft: true, skipClients: true, forceDetail: true });
   } catch (error) {
@@ -2228,11 +2277,21 @@ async function addHistoryEntry(donorId, yearInput, candidateInput, officeInput, 
   }
 }
 
-async function updateHistoryEntry(donorId, entryId, yearInput, candidateInput, officeInput, amountInput) {
+async function updateHistoryEntry(
+  donorId,
+  entryId,
+  yearInput,
+  candidateInput,
+  officeInput,
+  typeInput,
+  amountInput,
+) {
   if (!entryId) return;
   const yearValue = yearInput ? parseInt(yearInput.value, 10) : NaN;
   const candidate = candidateInput ? candidateInput.value.trim() : "";
   const office = officeInput ? officeInput.value.trim() : "";
+  const typeValue = typeInput ? typeInput.value : "monetary";
+  const isInKind = String(typeValue).toLowerCase() === "inkind";
   const amountValue = amountInput ? parseNumber(amountInput.value) : null;
   if (Number.isNaN(yearValue) || !candidate || amountValue === null) {
     return;
@@ -2243,6 +2302,7 @@ async function updateHistoryEntry(donorId, entryId, yearInput, candidateInput, o
       candidate,
       officeSought: office || undefined,
       amount: amountValue,
+      isInKind,
     };
     await fetchJson(`/api/donors/${donorId}/giving/${entryId}`, {
       method: "PATCH",
