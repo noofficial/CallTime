@@ -179,6 +179,7 @@ async function handleSubmit(event) {
     organizationName: formData.get("organizationName")?.toString().trim() || "",
     email: formData.get("email")?.toString().trim() || "",
     phone: formData.get("phone")?.toString().trim() || "",
+    alternatePhone: formData.get("alternatePhone")?.toString().trim() || "",
     street: formData.get("street")?.toString().trim() || "",
     addressLine2: formData.get("addressLine2")?.toString().trim() || "",
     company: formData.get("company")?.toString().trim() || "",

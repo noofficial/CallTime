@@ -159,6 +159,12 @@ const DONOR_COLUMN_MAP = new Map([
     ['mobile', 'phone'],
     ['cell', 'phone'],
     ['contactphone', 'phone'],
+    ['phone2', 'alternate_phone'],
+    ['alternatephone', 'alternate_phone'],
+    ['alternatephonenumber', 'alternate_phone'],
+    ['altphone', 'alternate_phone'],
+    ['secondaryphone', 'alternate_phone'],
+    ['otherphone', 'alternate_phone'],
     ['email', 'email'],
     ['emailaddress', 'email'],
     ['contactemail', 'email'],
@@ -776,6 +782,7 @@ const transformDonorRow = (row, fallbackClientId, clientLookup) => {
         business_name: isBusiness ? businessName : null,
         donor_type: donorType,
         phone: cleanString(row.phone),
+        alternate_phone: cleanString(row.alternate_phone),
         email: cleanString(row.email),
         street_address: address.street_address,
         address_line2: address.address_line2,
@@ -1070,6 +1077,7 @@ const DONORS_TABLE_COLUMNS_SQL = `
     business_name TEXT,
     donor_type TEXT DEFAULT 'individual',
     phone TEXT,
+    alternate_phone TEXT,
     email TEXT,
     street_address TEXT,
     address_line2 TEXT,
@@ -1173,6 +1181,7 @@ const DONORS_COLUMN_ORDER = [
     'business_name',
     'donor_type',
     'phone',
+    'alternate_phone',
     'email',
     'street_address',
     'address_line2',
@@ -2040,6 +2049,7 @@ ${DONORS_TABLE_COLUMNS_SQL}
         ensureColumn('donors', 'state', 'state TEXT')
         ensureColumn('donors', 'postal_code', 'postal_code TEXT')
         ensureColumn('donors', 'donor_type', "donor_type TEXT DEFAULT 'individual'")
+        ensureColumn('donors', 'alternate_phone', 'alternate_phone TEXT')
         backfillDonorTypes()
         ensureColumn('donors', 'notes', 'notes TEXT')
         ensureColumn('clients', 'candidate', 'candidate TEXT')
@@ -2621,12 +2631,12 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
 
         const insertStmt = db.prepare(`
             INSERT INTO donors (
-                client_id, name, first_name, last_name, contact_first_name, contact_last_name, is_business, business_name, donor_type, phone, email,
+                client_id, name, first_name, last_name, contact_first_name, contact_last_name, is_business, business_name, donor_type, phone, alternate_phone, email,
                 street_address, address_line2, city, state, postal_code,
                 employer, occupation, job_title, tags, suggested_ask, last_gift_note,
                 notes, bio, photo_url
             ) VALUES (
-                @client_id, @name, @first_name, @last_name, @contact_first_name, @contact_last_name, @is_business, @business_name, @donor_type, @phone, @email,
+                @client_id, @name, @first_name, @last_name, @contact_first_name, @contact_last_name, @is_business, @business_name, @donor_type, @phone, @alternate_phone, @email,
                 @street_address, @address_line2, @city, @state, @postal_code,
                 @employer, @occupation, @job_title, @tags, @suggested_ask, @last_gift_note,
                 @notes, @bio, @photo_url
@@ -2645,6 +2655,7 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
                 business_name = COALESCE(@business_name, business_name),
                 donor_type = COALESCE(@donor_type, donor_type),
                 phone = COALESCE(@phone, phone),
+                alternate_phone = COALESCE(@alternate_phone, alternate_phone),
                 email = COALESCE(@email, email),
                 street_address = COALESCE(@street_address, street_address),
                 address_line2 = COALESCE(@address_line2, address_line2),
@@ -3430,20 +3441,24 @@ app.post('/api/clients/:clientId/donors', authenticateManager, (req, res) => {
     try {
         const donorStmt = db.prepare(`
             INSERT INTO donors(
-                client_id, name, phone, email, street_address, address_line2, city, state, postal_code,
+                client_id, name, phone, alternate_phone, email, street_address, address_line2, city, state, postal_code,
                 employer, occupation, job_title, bio, photo_url, tags, suggested_ask, last_gift_note
             )
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         `)
         const street = cleanString(d.street_address ?? d.street)
         const addressLine2 = cleanString(d.address_line2 ?? d.addressLine2)
         const city = cleanString(d.city)
         const state = cleanString(d.state ?? d.region)
         const postal = cleanString(d.postal_code ?? d.postalCode)
+        const alternatePhone = cleanString(
+            d.alternate_phone ?? d.alternatePhone ?? d.phone2 ?? d.secondary_phone
+        )
         const donorResult = donorStmt.run(
             ownerClientId,
             d.name,
             d.phone,
+            alternatePhone,
             d.email,
             street,
             addressLine2,
@@ -3638,14 +3653,14 @@ app.post('/api/donors', authenticateManager, (req, res) => {
             INSERT INTO donors (
                 client_id, exclusive_donor, exclusive_client_id,
                 name, first_name, last_name, contact_first_name, contact_last_name, is_business, business_name, donor_type,
-                phone, email,
+                phone, alternate_phone, email,
                 street_address, address_line2, city, state, postal_code,
                 employer, occupation, job_title, tags, suggested_ask, last_gift_note,
                 notes, bio, photo_url
             ) VALUES (
                 ?, ?, ?,
                 ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?,
+                ?, ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?,
                 ?, ?, ?
@@ -3659,6 +3674,13 @@ app.post('/api/donors', authenticateManager, (req, res) => {
         const postal = cleanString(payload.postalCode ?? payload.postal)
 
         const phoneValue = cleanString(payload.phone)
+        const alternatePhoneValue = cleanString(
+            payload.alternatePhone ??
+                payload.alternate_phone ??
+                payload.phone2 ??
+                payload.secondaryPhone ??
+                payload.secondary_phone
+        )
         const emailValue = cleanString(payload.email)
         const companyValue = cleanString(payload.company)
         const occupationValue = cleanString(payload.industry)
@@ -3689,6 +3711,7 @@ app.post('/api/donors', authenticateManager, (req, res) => {
             businessName,
             donorType,
             phoneValue,
+            alternatePhoneValue,
             emailValue,
             street,
             addressLine2,
@@ -3931,6 +3954,7 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
                 business_name = ?,
                 donor_type = ?,
                 phone = ?,
+                alternate_phone = ?,
                 email = ?,
                 street_address = ?,
                 address_line2 = ?,
@@ -3954,6 +3978,18 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
         const runUpdate = db.transaction(() => {
             const phoneValue =
                 payload.phone !== undefined ? cleanString(payload.phone) : existing.phone || null
+            const alternatePhoneValue =
+                payload.alternatePhone !== undefined
+                    ? cleanString(payload.alternatePhone)
+                    : payload.alternate_phone !== undefined
+                        ? cleanString(payload.alternate_phone)
+                        : payload.phone2 !== undefined
+                            ? cleanString(payload.phone2)
+                            : payload.secondaryPhone !== undefined
+                                ? cleanString(payload.secondaryPhone)
+                                : payload.secondary_phone !== undefined
+                                    ? cleanString(payload.secondary_phone)
+                                    : existing.alternate_phone || null
             const emailValue =
                 payload.email !== undefined ? cleanString(payload.email) : existing.email || null
             const companyValue =
@@ -3987,6 +4023,7 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
                 businessName,
                 donorType,
                 phoneValue,
+                alternatePhoneValue,
                 emailValue,
                 streetValue,
                 addressLine2Value,

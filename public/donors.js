@@ -472,6 +472,12 @@ function normalizeDonorSummary(donor, clients = state.clients || []) {
     businessName: rawOrganizationName || "",
     email: donor.email || "",
     phone: donor.phone || "",
+    alternatePhone:
+      donor.alternate_phone ||
+      donor.alternatePhone ||
+      donor.phone2 ||
+      donor.secondary_phone ||
+      "",
     city: donor.city || "",
     state: donor.state || "",
     postalCode: donor.postal_code || "",
@@ -1158,6 +1164,7 @@ function createDraftFromDonor(donor) {
       contactLastName: donor.contactLastName || "",
       email: donor.email || "",
       phone: donor.phone || "",
+      alternatePhone: donor.alternatePhone || "",
       street: donor.street || "",
       addressLine2: donor.addressLine2 || "",
       city: donor.city || "",
@@ -1299,6 +1306,15 @@ function createIdentitySection(draft) {
     createInputField("inline-phone", "phone", "Phone", draft.values.phone, {
       autocomplete: "tel",
     }),
+    createInputField(
+      "inline-alternate-phone",
+      "alternatePhone",
+      "Alternate phone",
+      draft.values.alternatePhone,
+      {
+        autocomplete: "tel",
+      },
+    ),
     createInputField("inline-street", "street", "Street address", draft.values.street, {
       autocomplete: "address-line1",
     }),
@@ -1660,6 +1676,7 @@ async function handleInlineSubmit(donor) {
     businessName: isOrganization ? organizationName : "",
     email: values.email.trim(),
     phone: values.phone.trim(),
+    alternatePhone: values.alternatePhone.trim(),
     street: values.street.trim(),
     addressLine2: values.addressLine2.trim(),
     city: values.city.trim(),

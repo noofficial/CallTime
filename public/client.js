@@ -625,7 +625,20 @@ function renderQueue() {
     if (location) {
       parts.push(location);
     }
-    parts.push(donor.phone || "No phone");
+    const primaryPhone = getPrimaryPhone(donor);
+    const alternatePhone = getAlternatePhone(donor);
+    if (primaryPhone || alternatePhone) {
+      const phoneParts = [];
+      if (primaryPhone) {
+        phoneParts.push(primaryPhone);
+      }
+      if (alternatePhone) {
+        phoneParts.push(`Alt: ${alternatePhone}`);
+      }
+      parts.push(phoneParts.join(" • "));
+    } else {
+      parts.push("No phone");
+    }
     const capacityValue = donor.capacity || donor.suggested_ask || 0;
     parts.push(`Capacity: $${formatCurrency(capacityValue)}`);
     details.textContent = parts.filter(Boolean).join(" • ");
@@ -691,9 +704,18 @@ function renderDonorDetails(details) {
 
     const grid = document.createElement("div");
     grid.className = "donor-info-grid";
+    const detailPrimaryPhone = getPrimaryPhone(details);
+    const detailAlternatePhone = getAlternatePhone(details);
+    const phoneLines = [];
+    if (detailPrimaryPhone) {
+      phoneLines.push(detailPrimaryPhone);
+    }
+    if (detailAlternatePhone) {
+      phoneLines.push(`Alternate: ${detailAlternatePhone}`);
+    }
     const streetLines = formatStreetAddress(details);
     grid.append(
-      renderInfoItem("Phone", details.phone || "No phone on file"),
+      renderInfoItem("Phone", phoneLines.length ? phoneLines : "No phone on file"),
       renderInfoItem("Email", details.email || "No email on file"),
       renderInfoItem("Employer", details.company || details.employer || "Unknown"),
       renderInfoItem("Title", details.job_title || details.title || "Unknown"),
@@ -869,6 +891,23 @@ function renderCallHistory(history = []) {
 function normalizeText(value) {
   if (value === null || value === undefined) return "";
   return String(value).trim();
+}
+
+function getPrimaryPhone(record) {
+  if (!record) return "";
+  return normalizeText(record.phone);
+}
+
+function getAlternatePhone(record) {
+  if (!record) return "";
+  return normalizeText(
+    record.alternate_phone ??
+      record.alternatePhone ??
+      record.phone2 ??
+      record.secondaryPhone ??
+      record.secondary_phone ??
+      "",
+  );
 }
 
 function formatDonorLocation(donor) {

@@ -595,6 +595,10 @@ function applyDonorFilter() {
       donor.industry,
       donor.email,
       donor.phone,
+      donor.alternate_phone,
+      donor.alternatePhone,
+      donor.phone2,
+      donor.secondary_phone,
       donor.tags,
       donor.assigned_clients,
     ]
@@ -651,6 +655,19 @@ function renderDonors() {
     }
     if (capacity) {
       detailParts.push(`Capacity: $${Number(capacity).toLocaleString()}`);
+    }
+    const primaryPhone = (donor.phone || "").trim();
+    const alternatePhone =
+      (donor.alternate_phone || donor.alternatePhone || donor.phone2 || donor.secondary_phone || "").trim();
+    if (primaryPhone || alternatePhone) {
+      const phoneParts = [];
+      if (primaryPhone) {
+        phoneParts.push(primaryPhone);
+      }
+      if (alternatePhone) {
+        phoneParts.push(`Alt: ${alternatePhone}`);
+      }
+      detailParts.push(phoneParts.join(" • "));
     }
     details.textContent = detailParts.filter(Boolean).join(" • ");
     info.append(details);

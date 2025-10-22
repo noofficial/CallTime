@@ -332,6 +332,15 @@ export class CallTimeDatabase {
       company: company.trim(),
       industry: industry.trim(),
       phone: (source.phone || source.Phone || "").trim(),
+      alternatePhone:
+        (
+          source.alternatePhone ||
+          source.alternate_phone ||
+          source.phone2 ||
+          source.secondaryPhone ||
+          source.secondary_phone ||
+          ""
+        ).trim(),
       email: (source.email || source.Email || "").trim(),
       biography: biography.trim(),
       pictureUrl: pictureUrl.trim(),
