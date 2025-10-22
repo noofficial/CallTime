@@ -268,7 +268,7 @@
                       <option value="campaign">Campaign / PAC</option>
                     </select>
                   </div>
-                  <div class="form-row">
+                  <div class="form-row hidden" data-identity-group="organization" hidden>
                     <label class="form-label" for="editor-organization-name">Organization name</label>
                     <input
                       class="input"
@@ -277,14 +277,32 @@
                       autocomplete="organization"
                     />
                   </div>
-                  <div class="form-row">
+                  <div class="form-row" data-identity-group="individual">
                     <label class="form-label" for="editor-first-name">First name</label>
                     <input class="input" id="editor-first-name" name="firstName" autocomplete="given-name" required />
                   </div>
-                  <div class="form-row">
-                  <label class="form-label" for="editor-last-name">Last name</label>
-                  <input class="input" id="editor-last-name" name="lastName" autocomplete="family-name" required />
-                </div>
+                  <div class="form-row" data-identity-group="individual">
+                    <label class="form-label" for="editor-last-name">Last name</label>
+                    <input class="input" id="editor-last-name" name="lastName" autocomplete="family-name" required />
+                  </div>
+                  <div class="form-row hidden" data-identity-group="organization-contact" hidden>
+                    <label class="form-label" for="editor-contact-first-name">Primary contact first name</label>
+                    <input
+                      class="input"
+                      id="editor-contact-first-name"
+                      name="contactFirstName"
+                      autocomplete="given-name"
+                    />
+                  </div>
+                  <div class="form-row hidden" data-identity-group="organization-contact" hidden>
+                    <label class="form-label" for="editor-contact-last-name">Primary contact last name</label>
+                    <input
+                      class="input"
+                      id="editor-contact-last-name"
+                      name="contactLastName"
+                      autocomplete="family-name"
+                    />
+                  </div>
                 <div class="form-row">
                   <label class="form-label" for="editor-email">Email</label>
                   <input class="input" id="editor-email" name="email" type="email" autocomplete="email" />

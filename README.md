@@ -109,6 +109,10 @@ skipped automatically.
   provide an `Organization Name` (mapped to `Business Name`) so searches and
   profiles display the correct entity. When the donor type column is missing or
   blank, the importer defaults to individual donors.
+- **Organization contact:** add `Primary Contact First Name` and `Primary
+  Contact Last Name` for businesses, organizations, campaigns, and PACs. These
+  fields populate the point-of-contact section in the donor database and are
+  surfaced inside the inline editor for quick reference.
 - **Campaign assignment:** include `Client ID`, `Client`, or `Campaign` to assign
   donors to a specific workspace. Leave the column out (or select **No client**)
   to keep donors unassigned after import.
@@ -140,7 +144,7 @@ used in the database.
 | --- | --- | --- |
 | `Donor Type` | Set to `Individual`, `Business`, or `Campaign/PAC` (blank defaults to Individual). | All donors |
 | `Organization Name` | Legal entity name surfaced in search and profiles. | Business, Campaign/PAC |
-| `Primary Contact First Name` / `Primary Contact Last Name` | Inline contact for organizations; leave blank for entity-only records. | Business, Campaign/PAC |
+| `Primary Contact First Name` / `Primary Contact Last Name` | Point of contact surfaced in the database and inline editor. | Business, Campaign/PAC |
 | `First Name` / `Last Name` | Personal name for the donor. Use when `Donor Type` is Individual. | Individual |
 | `Email`, `Phone`, `Street`, `City`, `State`, `Postal Code` | Shared contact information across every donor type. | All donors |
 | `Tags`, `Suggested Ask`, `Last Gift`, `Notes` | Optional stewardship context imported verbatim into the profile. | All donors |

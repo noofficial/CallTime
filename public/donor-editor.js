@@ -15,6 +15,8 @@ const elements = {
   lastName: document.getElementById("editor-last-name"),
   donorType: document.getElementById("editor-donor-type"),
   organizationName: document.getElementById("editor-organization-name"),
+  contactFirstName: document.getElementById("editor-contact-first-name"),
+  contactLastName: document.getElementById("editor-contact-last-name"),
   assignments: document.getElementById("editor-client-assignments"),
   selectAll: document.getElementById("select-all-clients"),
   exclusiveToggle: document.getElementById("editor-exclusive-toggle"),
@@ -29,6 +31,12 @@ const elements = {
 
 const callbacks = {
   onSuccess: defaultOnSuccess,
+};
+
+const identityGroups = {
+  individual: Array.from(document.querySelectorAll("[data-identity-group='individual']")),
+  organization: Array.from(document.querySelectorAll("[data-identity-group='organization']")),
+  organizationContact: Array.from(document.querySelectorAll("[data-identity-group='organization-contact']")),
 };
 
 init();
@@ -88,6 +96,12 @@ function resetEditorState() {
   }
   if (elements.organizationName) {
     elements.organizationName.value = "";
+  }
+  if (elements.contactFirstName) {
+    elements.contactFirstName.value = "";
+  }
+  if (elements.contactLastName) {
+    elements.contactLastName.value = "";
   }
   if (elements.exclusiveToggle) {
     elements.exclusiveToggle.value = "no";
@@ -159,6 +173,8 @@ async function handleSubmit(event) {
   const payload = {
     firstName: formData.get("firstName")?.toString().trim() || "",
     lastName: formData.get("lastName")?.toString().trim() || "",
+    contactFirstName: formData.get("contactFirstName")?.toString().trim() || "",
+    contactLastName: formData.get("contactLastName")?.toString().trim() || "",
     donorType,
     organizationName: formData.get("organizationName")?.toString().trim() || "",
     email: formData.get("email")?.toString().trim() || "",
@@ -187,6 +203,24 @@ async function handleSubmit(event) {
   const isOrganization = payload.donorType === "business" || payload.donorType === "campaign";
   payload.isBusiness = isOrganization;
   payload.businessName = isOrganization ? payload.organizationName : "";
+  if (isOrganization) {
+    if (!payload.organizationName) {
+      setStatus(
+        payload.donorType === "campaign"
+          ? "Campaign and PAC donors must include an organization name."
+          : "Business and organization donors must include an organization name.",
+        "error",
+      );
+      return;
+    }
+    if (!payload.contactFirstName || !payload.contactLastName) {
+      setStatus("Add a primary contact first and last name for this organization.", "error");
+      return;
+    }
+  } else {
+    payload.contactFirstName = "";
+    payload.contactLastName = "";
+  }
 
   try {
     const result = await fetchJson("/api/donors", {
@@ -302,13 +336,37 @@ function updateIdentityFieldState() {
   const isOrganization = type === "business" || type === "campaign";
   if (elements.organizationName) {
     elements.organizationName.required = isOrganization;
+    toggleIdentityGroup("organization", isOrganization);
   }
   if (elements.firstName) {
     elements.firstName.required = !isOrganization;
+    toggleIdentityGroup("individual", !isOrganization);
   }
   if (elements.lastName) {
     elements.lastName.required = !isOrganization;
   }
+  if (elements.contactFirstName) {
+    elements.contactFirstName.required = isOrganization;
+  }
+  if (elements.contactLastName) {
+    elements.contactLastName.required = isOrganization;
+  }
+  toggleIdentityGroup("organization-contact", isOrganization);
+}
+
+function toggleIdentityGroup(group, shouldShow) {
+  const nodes = identityGroups[group] || [];
+  nodes.forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    node.classList.toggle("hidden", !shouldShow);
+    if (shouldShow) {
+      node.removeAttribute("hidden");
+      node.setAttribute("aria-hidden", "false");
+    } else {
+      node.setAttribute("hidden", "");
+      node.setAttribute("aria-hidden", "true");
+    }
+  });
 }
 
 function renderAssignments() {
