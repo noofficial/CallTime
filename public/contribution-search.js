@@ -341,7 +341,7 @@ function renderContributionTable(contributions) {
 
   const thead = document.createElement("thead");
   const headerRow = document.createElement("tr");
-  ["Year", "Candidate", "Amount"].forEach((label) => {
+  ["Year", "Candidate", "Type", "Amount"].forEach((label) => {
     const th = document.createElement("th");
     th.scope = "col";
     th.textContent = label;
@@ -362,8 +362,15 @@ function renderContributionTable(contributions) {
     candidateCell.textContent = entry?.candidate || "—";
     row.append(candidateCell);
 
+    const typeCell = document.createElement("td");
+    typeCell.textContent = entry?.isInKind ? "In-kind" : "Monetary";
+    row.append(typeCell);
+
     const amountCell = document.createElement("td");
     amountCell.textContent = `$${formatCurrency(entry?.amount)}`;
+    if (entry?.isInKind) {
+      amountCell.classList.add("contribution-search__amount--inkind");
+    }
     row.append(amountCell);
 
     tbody.append(row);
@@ -444,6 +451,7 @@ function normalizeSearchResults(payload) {
                 year: Number.isFinite(Number(entry?.year)) ? Number(entry.year) : null,
                 amount: toNumber(entry?.amount),
                 candidate: entry?.candidate || "",
+                isInKind: Boolean(entry?.isInKind ?? entry?.is_inkind ?? entry?.inkind),
               }))
             : [],
         }))
