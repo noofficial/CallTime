@@ -2895,6 +2895,16 @@ app.get('/api/client/:clientId/donor/:donorId', authenticateClient, (req, res) =
 
     try {
         const donor = ensureClientHasDonor(clientId, donorId)
+        const donorDetails = { ...donor }
+        const donorDatabaseNotesRaw = donorDetails.notes
+        delete donorDetails.notes
+
+        const donorDatabaseNotes =
+            typeof donorDatabaseNotesRaw === 'string'
+                ? donorDatabaseNotesRaw
+                : donorDatabaseNotesRaw == null
+                ? ''
+                : String(donorDatabaseNotesRaw)
 
         // Get client-specific research
         const research = db.prepare(`
@@ -2904,9 +2914,9 @@ app.get('/api/client/:clientId/donor/:donorId', authenticateClient, (req, res) =
         `).all(clientId, donorId)
 
         // Get client-specific notes
-        const notes = db.prepare(`
+        const privateNotes = db.prepare(`
             SELECT note_type, note_content, created_at, updated_at
-            FROM client_donor_notes 
+            FROM client_donor_notes
             WHERE client_id = ? AND donor_id = ?
             ORDER BY created_at DESC
         `).all(clientId, donorId)
@@ -2926,9 +2936,12 @@ app.get('/api/client/:clientId/donor/:donorId', authenticateClient, (req, res) =
         `).all(donorId)
 
         res.json({
-            ...donor,
+            ...donorDetails,
+            donorDatabaseNotes,
             research,
-            notes,
+            privateNotes,
+            // Maintain legacy "notes" key for compatibility with existing clients
+            notes: privateNotes,
             callHistory,
             givingHistory
         })

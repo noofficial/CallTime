@@ -745,9 +745,16 @@ function renderDonorDetails(details) {
       elements.donorInfo.append(researchSection);
     }
 
-    const notesSection = renderNotes(details.notes);
-    if (notesSection) {
-      elements.donorInfo.append(notesSection);
+    const donorDatabaseNotesSection = renderDatabaseNotes(
+      resolveDonorDatabaseNotes(details),
+    );
+    if (donorDatabaseNotesSection) {
+      elements.donorInfo.append(donorDatabaseNotesSection);
+    }
+
+    const privateNotesSection = renderPrivateNotes(resolvePrivateNotes(details));
+    if (privateNotesSection) {
+      elements.donorInfo.append(privateNotesSection);
     }
   }
 
@@ -804,7 +811,37 @@ function renderResearch(research = []) {
   return section;
 }
 
-function renderNotes(notes = []) {
+function renderDatabaseNotes(notes) {
+  const text = typeof notes === "string" ? notes.trim() : "";
+  if (!text) return null;
+
+  const section = document.createElement("section");
+  section.className = "info-group";
+  const heading = document.createElement("h3");
+  heading.textContent = "Donor database notes";
+  section.append(heading);
+
+  const article = document.createElement("article");
+  article.className = "info-block";
+
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length) {
+    lines.forEach((line) => {
+      const paragraph = document.createElement("p");
+      paragraph.textContent = line;
+      article.append(paragraph);
+    });
+  } else {
+    const paragraph = document.createElement("p");
+    paragraph.textContent = text;
+    article.append(paragraph);
+  }
+
+  section.append(article);
+  return section;
+}
+
+function renderPrivateNotes(notes = []) {
   if (!Array.isArray(notes) || !notes.length) return null;
   const section = document.createElement("section");
   section.className = "info-group";
@@ -833,6 +870,31 @@ function renderNotes(notes = []) {
   });
 
   return section;
+}
+
+function resolveDonorDatabaseNotes(details) {
+  if (!details) return "";
+  if (typeof details.donorDatabaseNotes === "string") {
+    return details.donorDatabaseNotes;
+  }
+  if (details.donorDatabaseNotes != null) {
+    return String(details.donorDatabaseNotes);
+  }
+  if (typeof details.notes === "string") {
+    return details.notes;
+  }
+  return "";
+}
+
+function resolvePrivateNotes(details) {
+  if (!details) return [];
+  if (Array.isArray(details.privateNotes)) {
+    return details.privateNotes;
+  }
+  if (Array.isArray(details.notes)) {
+    return details.notes;
+  }
+  return [];
 }
 
 function renderCallHistory(history = []) {
@@ -1126,11 +1188,14 @@ export const __TESTING__ = {
   renderQueue,
   renderDonorDetails,
   renderResearch,
-  renderNotes,
+  renderDatabaseNotes,
+  renderPrivateNotes,
   renderCallHistory,
   renderInfoItem,
   renderTags,
   formatDonorLocation,
   formatStreetAddress,
   escapeHtml,
+  resolveDonorDatabaseNotes,
+  resolvePrivateNotes,
 };
