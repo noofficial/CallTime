@@ -44,6 +44,7 @@ function ensureIntegrationDatabase() {
       business_name TEXT,
       donor_type TEXT DEFAULT 'individual',
       phone TEXT,
+      alternate_phone TEXT,
       email TEXT,
       street_address TEXT,
       address_line2 TEXT,
