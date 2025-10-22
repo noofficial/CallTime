@@ -412,6 +412,18 @@ function normalizeDonorSummary(donor, clients = state.clients || []) {
   const id = donor.id != null ? String(donor.id) : "";
   const firstName = donor.first_name || "";
   const lastName = donor.last_name || "";
+  const contactFirstName =
+    donor.contact_first_name ||
+    donor.contactFirstName ||
+    donor.primary_contact_first_name ||
+    donor.primaryContactFirstName ||
+    "";
+  const contactLastName =
+    donor.contact_last_name ||
+    donor.contactLastName ||
+    donor.primary_contact_last_name ||
+    donor.primaryContactLastName ||
+    "";
   const donorType = resolveDonorTypeFromRecord(donor);
   const isOrganization = ORGANIZATION_DONOR_TYPES.has(donorType);
   const rawOrganizationName =
@@ -451,6 +463,8 @@ function normalizeDonorSummary(donor, clients = state.clients || []) {
     name: displayName || "New donor",
     firstName,
     lastName,
+    contactFirstName,
+    contactLastName,
     type: donorType,
     typeLabel: DONOR_TYPE_LABELS[donorType] || "Donor",
     isBusiness: isOrganization,
@@ -1023,6 +1037,12 @@ function renderDonorDetail() {
   meta.hidden = !metaText;
   identity.append(meta);
 
+  const contactLine = document.createElement("p");
+  contactLine.className = "muted";
+  contactLine.setAttribute("data-organization-contact", "");
+  updateOrganizationContactDisplay(contactLine, draft.values);
+  identity.append(contactLine);
+
   const actions = document.createElement("div");
   actions.className = "donor-inline-form__actions";
   const status = document.createElement("span");
@@ -1134,6 +1154,8 @@ function createDraftFromDonor(donor) {
       lastName: donor.lastName || "",
       donorType: ALL_DONOR_TYPES.includes(donor.type) ? donor.type : DONOR_TYPE.INDIVIDUAL,
       organizationName: donor.organizationName || "",
+      contactFirstName: donor.contactFirstName || "",
+      contactLastName: donor.contactLastName || "",
       email: donor.email || "",
       phone: donor.phone || "",
       street: donor.street || "",
@@ -1232,15 +1254,43 @@ function createIdentitySection(draft) {
       {
         required: organizationRequired,
         autocomplete: "organization",
+        identityGroup: "organization",
+        hidden: !organizationRequired,
       },
     ),
     createInputField("inline-first-name", "firstName", "First name", draft.values.firstName, {
       required: !organizationRequired,
       autocomplete: "given-name",
+      identityGroup: "individual",
     }),
     createInputField("inline-last-name", "lastName", "Last name", draft.values.lastName, {
       required: !organizationRequired,
       autocomplete: "family-name",
+      identityGroup: "individual",
+    }),
+    createInputField(
+      "inline-contact-first-name",
+      "contactFirstName",
+      "Primary contact first name",
+      draft.values.contactFirstName,
+      {
+        required: organizationRequired,
+        autocomplete: "given-name",
+        identityGroup: "organization-contact",
+        hidden: !organizationRequired,
+      },
+    ),
+    createInputField(
+      "inline-contact-last-name",
+      "contactLastName",
+      "Primary contact last name",
+      draft.values.contactLastName,
+      {
+        required: organizationRequired,
+        autocomplete: "family-name",
+        identityGroup: "organization-contact",
+        hidden: !organizationRequired,
+      },
     }),
     createInputField("inline-email", "email", "Email", draft.values.email, {
       type: "email",
@@ -1424,6 +1474,14 @@ function createSelectField(id, name, label, value, options = []) {
 function createInputField(id, name, label, value, options = {}) {
   const wrapper = document.createElement("div");
   wrapper.className = "form-row";
+  if (options.identityGroup) {
+    wrapper.dataset.identityGroup = options.identityGroup;
+  }
+  if (options.hidden) {
+    wrapper.classList.add("hidden");
+    wrapper.setAttribute("hidden", "");
+    wrapper.setAttribute("aria-hidden", "true");
+  }
   const labelEl = document.createElement("label");
   labelEl.className = "form-label";
   labelEl.setAttribute("for", id);
@@ -1470,6 +1528,8 @@ function updateInlineIdentityRequirements(form, values) {
   const firstNameInput = form.querySelector("input[name='firstName']");
   const lastNameInput = form.querySelector("input[name='lastName']");
   const organizationInput = form.querySelector("input[name='organizationName']");
+  const contactFirstInput = form.querySelector("input[name='contactFirstName']");
+  const contactLastInput = form.querySelector("input[name='contactLastName']");
   if (firstNameInput) {
     firstNameInput.required = !isOrganization;
   }
@@ -1479,6 +1539,51 @@ function updateInlineIdentityRequirements(form, values) {
   if (organizationInput) {
     organizationInput.required = isOrganization;
   }
+  if (contactFirstInput) {
+    contactFirstInput.required = isOrganization;
+  }
+  if (contactLastInput) {
+    contactLastInput.required = isOrganization;
+  }
+  toggleInlineIdentityGroup(form, "individual", !isOrganization);
+  toggleInlineIdentityGroup(form, "organization", isOrganization);
+  toggleInlineIdentityGroup(form, "organization-contact", isOrganization);
+}
+
+function toggleInlineIdentityGroup(form, group, shouldShow) {
+  form
+    .querySelectorAll(`[data-identity-group="${group}"]`)
+    .forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      node.classList.toggle("hidden", !shouldShow);
+      if (shouldShow) {
+        node.removeAttribute("hidden");
+        node.setAttribute("aria-hidden", "false");
+      } else {
+        node.setAttribute("hidden", "");
+        node.setAttribute("aria-hidden", "true");
+      }
+    });
+}
+
+function updateOrganizationContactDisplay(element, values) {
+  if (!(element instanceof HTMLElement)) return;
+  const donorType = values?.donorType && ALL_DONOR_TYPES.includes(values.donorType)
+    ? values.donorType
+    : DONOR_TYPE.INDIVIDUAL;
+  const isOrganization = ORGANIZATION_DONOR_TYPES.has(donorType);
+  const contactFirst = typeof values?.contactFirstName === "string" ? values.contactFirstName.trim() : "";
+  const contactLast = typeof values?.contactLastName === "string" ? values.contactLastName.trim() : "";
+  const contactName = `${contactFirst} ${contactLast}`.trim();
+  if (!isOrganization || !contactName) {
+    element.textContent = "";
+    element.hidden = true;
+    element.setAttribute("aria-hidden", "true");
+    return;
+  }
+  element.textContent = `Primary contact: ${contactName}`;
+  element.hidden = false;
+  element.removeAttribute("aria-hidden");
 }
 
 function handleInlineInput(event, donor, nameHeading, metaElement) {
@@ -1511,6 +1616,16 @@ function handleInlineInput(event, donor, nameHeading, metaElement) {
     nameHeading.textContent = buildDraftDisplayName(state.detailDraft.values, donor);
   }
   if (
+    target.name === "contactFirstName" ||
+    target.name === "contactLastName" ||
+    target.name === "donorType"
+  ) {
+    const contactNode = event.currentTarget?.querySelector?.("[data-organization-contact]");
+    if (contactNode instanceof HTMLElement) {
+      updateOrganizationContactDisplay(contactNode, state.detailDraft.values);
+    }
+  }
+  if (
     target.name === "city" ||
     target.name === "state" ||
     target.name === "postalCode" ||
@@ -1531,10 +1646,14 @@ async function handleInlineSubmit(donor) {
   const values = state.detailDraft.values;
   const donorType = ALL_DONOR_TYPES.includes(values.donorType) ? values.donorType : DONOR_TYPE.INDIVIDUAL;
   const organizationName = values.organizationName.trim();
+  const contactFirstName = values.contactFirstName ? values.contactFirstName.trim() : "";
+  const contactLastName = values.contactLastName ? values.contactLastName.trim() : "";
   const isOrganization = ORGANIZATION_DONOR_TYPES.has(donorType);
   const payload = {
     firstName: values.firstName.trim(),
     lastName: values.lastName.trim(),
+    contactFirstName,
+    contactLastName,
     donorType,
     organizationName,
     isBusiness: isOrganization,
@@ -1558,6 +1677,11 @@ async function handleInlineSubmit(donor) {
     exclusiveDonor: values.exclusiveDonor === "yes",
     exclusiveClientId: values.exclusiveClientId || null,
   };
+
+  if (!isOrganization) {
+    payload.contactFirstName = "";
+    payload.contactLastName = "";
+  }
 
   try {
     const updated = await fetchJson(`/api/donors/${donor.id}`, {

@@ -142,13 +142,17 @@ const DONOR_COLUMN_MAP = new Map([
     ['firstname', 'first_name'],
     ['givenname', 'first_name'],
     ['preferredname', 'first_name'],
-    ['contactfirstname', 'first_name'],
-    ['primarycontactfirstname', 'first_name'],
+    ['contactfirstname', 'contact_first_name'],
+    ['primarycontactfirstname', 'contact_first_name'],
+    ['primarycontactfirst', 'contact_first_name'],
+    ['contactfirst', 'contact_first_name'],
     ['lastname', 'last_name'],
     ['surname', 'last_name'],
     ['last', 'last_name'],
-    ['contactlastname', 'last_name'],
-    ['primarycontactlastname', 'last_name'],
+    ['contactlastname', 'contact_last_name'],
+    ['primarycontactlastname', 'contact_last_name'],
+    ['primarycontactlast', 'contact_last_name'],
+    ['contactlast', 'contact_last_name'],
     ['phone', 'phone'],
     ['phonenumber', 'phone'],
     ['phone1', 'phone'],
@@ -690,6 +694,8 @@ const transformDonorRow = (row, fallbackClientId, clientLookup) => {
     const donorId = parseInteger(row.id)
     let firstName = cleanString(row.first_name)
     let lastName = cleanString(row.last_name)
+    let contactFirstName = cleanString(row.contact_first_name)
+    let contactLastName = cleanString(row.contact_last_name)
     let name = cleanString(row.name)
     const legacyBusinessFlag = parseBooleanFlag(row.is_business, { defaultValue: false })
     let businessName = cleanString(row.business_name)
@@ -737,6 +743,8 @@ const transformDonorRow = (row, fallbackClientId, clientLookup) => {
         }
 
         businessName = null
+        contactFirstName = null
+        contactLastName = null
     }
 
     const isBusiness = isOrganizationDonor
@@ -762,6 +770,8 @@ const transformDonorRow = (row, fallbackClientId, clientLookup) => {
         name,
         first_name: firstName,
         last_name: lastName,
+        contact_first_name: isBusiness ? contactFirstName : null,
+        contact_last_name: isBusiness ? contactLastName : null,
         is_business: isBusiness ? 1 : 0,
         business_name: isBusiness ? businessName : null,
         donor_type: donorType,
@@ -1054,6 +1064,8 @@ const DONORS_TABLE_COLUMNS_SQL = `
     name TEXT NOT NULL,
     first_name TEXT,
     last_name TEXT,
+    contact_first_name TEXT,
+    contact_last_name TEXT,
     is_business INTEGER DEFAULT 0,
     business_name TEXT,
     donor_type TEXT DEFAULT 'individual',
@@ -2018,6 +2030,8 @@ ${DONORS_TABLE_COLUMNS_SQL}
         ensureColumn('donors', 'business_name', 'business_name TEXT')
         ensureColumn('donors', 'first_name', 'first_name TEXT')
         ensureColumn('donors', 'last_name', 'last_name TEXT')
+        ensureColumn('donors', 'contact_first_name', 'contact_first_name TEXT')
+        ensureColumn('donors', 'contact_last_name', 'contact_last_name TEXT')
         ensureColumn('donors', 'is_business', 'is_business INTEGER DEFAULT 0')
         ensureColumn('donors', 'business_name', 'business_name TEXT')
         ensureColumn('donors', 'job_title', 'job_title TEXT')
@@ -2607,12 +2621,12 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
 
         const insertStmt = db.prepare(`
             INSERT INTO donors (
-                client_id, name, first_name, last_name, is_business, business_name, donor_type, phone, email,
+                client_id, name, first_name, last_name, contact_first_name, contact_last_name, is_business, business_name, donor_type, phone, email,
                 street_address, address_line2, city, state, postal_code,
                 employer, occupation, job_title, tags, suggested_ask, last_gift_note,
                 notes, bio, photo_url
             ) VALUES (
-                @client_id, @name, @first_name, @last_name, @is_business, @business_name, @donor_type, @phone, @email,
+                @client_id, @name, @first_name, @last_name, @contact_first_name, @contact_last_name, @is_business, @business_name, @donor_type, @phone, @email,
                 @street_address, @address_line2, @city, @state, @postal_code,
                 @employer, @occupation, @job_title, @tags, @suggested_ask, @last_gift_note,
                 @notes, @bio, @photo_url
@@ -2625,6 +2639,8 @@ app.post('/api/manager/donors/upload', authenticateManager, upload.single('file'
                 name = @name,
                 first_name = COALESCE(@first_name, first_name),
                 last_name = COALESCE(@last_name, last_name),
+                contact_first_name = COALESCE(@contact_first_name, contact_first_name),
+                contact_last_name = COALESCE(@contact_last_name, contact_last_name),
                 is_business = COALESCE(@is_business, is_business),
                 business_name = COALESCE(@business_name, business_name),
                 donor_type = COALESCE(@donor_type, donor_type),
@@ -3549,6 +3565,18 @@ app.post('/api/donors', authenticateManager, (req, res) => {
     }
     let firstNameValue = cleanString(payload.firstName)
     let lastNameValue = cleanString(payload.lastName)
+    let contactFirstNameValue = cleanString(
+        payload.contactFirstName ??
+            payload.contact_first_name ??
+            payload.primaryContactFirstName ??
+            payload.primary_contact_first_name
+    )
+    let contactLastNameValue = cleanString(
+        payload.contactLastName ??
+            payload.contact_last_name ??
+            payload.primaryContactLastName ??
+            payload.primary_contact_last_name
+    )
     const providedName = cleanString(payload.name)
     const businessFlagInput =
         payload.isBusiness ??
@@ -3596,6 +3624,8 @@ app.post('/api/donors', authenticateManager, (req, res) => {
     } else {
         donorType = 'individual'
         businessName = null
+        contactFirstNameValue = null
+        contactLastNameValue = null
     }
 
     resolvedName = cleanString(resolvedName)
@@ -3607,14 +3637,14 @@ app.post('/api/donors', authenticateManager, (req, res) => {
         const stmt = db.prepare(`
             INSERT INTO donors (
                 client_id, exclusive_donor, exclusive_client_id,
-                name, first_name, last_name, is_business, business_name, donor_type,
+                name, first_name, last_name, contact_first_name, contact_last_name, is_business, business_name, donor_type,
                 phone, email,
                 street_address, address_line2, city, state, postal_code,
                 employer, occupation, job_title, tags, suggested_ask, last_gift_note,
                 notes, bio, photo_url
             ) VALUES (
                 ?, ?, ?,
-                ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?,
                 ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?,
@@ -3653,6 +3683,8 @@ app.post('/api/donors', authenticateManager, (req, res) => {
             resolvedName,
             firstNameValue,
             lastNameValue,
+            contactFirstNameValue,
+            contactLastNameValue,
             isBusiness ? 1 : 0,
             businessName,
             donorType,
@@ -3733,6 +3765,34 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
         let lastName =
             payload.lastName !== undefined ? cleanString(payload.lastName) : existing.last_name || null
 
+        let contactFirstName = existing.contact_first_name || null
+        const contactFirstKeys = [
+            'contactFirstName',
+            'contact_first_name',
+            'primaryContactFirstName',
+            'primary_contact_first_name',
+        ]
+        for (const key of contactFirstKeys) {
+            if (Object.prototype.hasOwnProperty.call(payload, key)) {
+                contactFirstName = cleanString(payload[key])
+                break
+            }
+        }
+
+        let contactLastName = existing.contact_last_name || null
+        const contactLastKeys = [
+            'contactLastName',
+            'contact_last_name',
+            'primaryContactLastName',
+            'primary_contact_last_name',
+        ]
+        for (const key of contactLastKeys) {
+            if (Object.prototype.hasOwnProperty.call(payload, key)) {
+                contactLastName = cleanString(payload[key])
+                break
+            }
+        }
+
         const rawName = payload.name !== undefined ? cleanString(payload.name) : undefined
 
         const businessFlagInput =
@@ -3796,6 +3856,8 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
             if (!cleanString(name)) {
                 name = existing.name
             }
+            contactFirstName = null
+            contactLastName = null
         }
         let suggestedAskValue =
             payload.ask === null || payload.ask === undefined || payload.ask === ''
@@ -3863,6 +3925,8 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
             SET name = ?,
                 first_name = ?,
                 last_name = ?,
+                contact_first_name = ?,
+                contact_last_name = ?,
                 is_business = ?,
                 business_name = ?,
                 donor_type = ?,
@@ -3917,6 +3981,8 @@ app.put('/api/donors/:donorId', authenticateManager, (req, res) => {
                 name,
                 firstName || null,
                 lastName || null,
+                contactFirstName || null,
+                contactLastName || null,
                 isBusiness ? 1 : 0,
                 businessName,
                 donorType,
